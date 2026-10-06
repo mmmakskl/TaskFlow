@@ -344,3 +344,42 @@ async def test_create_manual_penalty_type_and_use_without_restart(
         penalty = await session.scalar(select(Penalty))
         assert penalty.points == 123 and penalty.calculation_type_snapshot == "MANUAL"
     await driver.bot.session.close()
+
+
+async def test_unexpected_handler_error_retries_and_notifies_once(
+    factory, settings: Settings
+) -> None:
+    from unittest.mock import AsyncMock
+
+    driver = BotDriver(factory, settings)
+    await driver.text(1001, "/start")
+    payload = {
+        "update_id": 999,
+        "message": {
+            "message_id": 9,
+            "date": int(datetime.now(UTC).timestamp()),
+            "chat": {"id": 1001, "type": "private"},
+            "from": {"id": 1001, "is_bot": False, "first_name": "Test"},
+            "text": "/menu",
+        },
+    }
+    async with factory.begin() as session:
+        session.add(Inbox(update_id=999, payload=payload))
+    driver.dp.feed_update = AsyncMock(side_effect=RuntimeError("injected handler failure"))
+    for attempt in (1, 2):
+        assert await process_update(factory, driver.dp, driver.bot) is False
+        async with factory.begin() as session:
+            record = await session.get(Inbox, 999)
+            assert record.attempts == attempt and record.status == "pending"
+            assert (
+                await session.scalar(
+                    select(func.count(Notification.id)).where(Notification.kind == "handler_error")
+                )
+                == 1
+            )
+            record.available_at = datetime.now(UTC)
+    from app.notifications.worker import send_notification
+
+    assert await send_notification(factory, driver.bot, settings)
+    assert "Не получилось выполнить" in driver.screen(1001).text
+    await driver.bot.session.close()

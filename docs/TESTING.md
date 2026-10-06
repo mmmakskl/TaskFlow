@@ -11,6 +11,7 @@ Run `make lint`, `make typecheck` and `make test`. Unit tests need no external s
 - Repositories/services: empty migrations, peer creation/rating/completion, awarded and penalty snapshots, rate changes, reopen reversal, immutable event triggers, idempotent seed, concurrent completion/penalty creation and concurrent notification claims.
 - Telegram: actual aiogram dispatch with mocked HTTP Bot API, durable inbox, one edited UI per user, duplicate and stale callbacks, optional fields, confirmations and unauthorized users.
 - HTTP: health/readiness, secret rejection, duplicate update IDs, invalid bodies and size limits.
+- Recovery: unexpected handler rollback/retry with one safe notification; SQL error privacy; history timezone aggregation and bounded pagination.
 
 There is no arbitrary percentage gate; required business flows and regression cases are the gate. Coverage reports show which UI branches need further tests. Mocked Telegram tests do not substitute for real production chat acceptance.
 

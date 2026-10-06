@@ -15,3 +15,7 @@
 - Final correction pass:59/59 PostgreSQL tests green; Ruff/mypy and runtime dependency audit pass. SQL parameters/server DETAIL hidden; expired acknowledgments do not roll back mutations.
 
 - Ruling: use user-selected Render Free — owner declined paid always-on plan — cost if wrong: cold-start delays, later paid upgrade needs approval.
+
+- Production: Live Render webhook service, /health and /ready verified, unauthorized POST403 verified by hosted smoke, getWebhookInfo correct/no backlog/error, real Max task persists after redeploy.
+- Live penalty smoke verified old1200/new150 snapshots, net−1350, confirmed soft deletions and ledger reversal to0, original rate100 restored. Read-only DB audit found failed updates0.
+- Final expanded suite61/61 passed in Docker, coverage67%; real Vika acceptance explicitly deferred by user.

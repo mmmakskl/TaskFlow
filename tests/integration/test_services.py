@@ -197,3 +197,39 @@ async def test_events_are_database_immutable(factory, settings: Settings) -> Non
     with pytest.raises(DBAPIError):
         async with factory.begin() as session:
             await session.execute(update(ScoreEvent).values(points=1000))
+
+
+async def test_history_aggregates_local_weeks_and_clamps_pagination(
+    factory, settings: Settings
+) -> None:
+    from app.utils.time import week_bounds
+
+    async with factory.begin() as session:
+        repo = ResultRepository(session)
+        service = ResultService(repo, settings)
+        assert await service.history(99) == ([], 0, False)
+        owner = (await repo.users())[0]
+        start, _ = week_bounds(utcnow(), settings.default_timezone, -2)
+        session.add_all(
+            [
+                ScoreEvent(
+                    user_id=owner.id,
+                    category="task",
+                    points=500,
+                    effective_at=start + timedelta(hours=1),
+                    operation_key="history-task",
+                ),
+                ScoreEvent(
+                    user_id=owner.id,
+                    category="penalty",
+                    points=-1200,
+                    effective_at=start + timedelta(hours=2),
+                    operation_key="history-penalty",
+                ),
+            ]
+        )
+        await session.flush()
+        weeks, page, more = await service.history(99)
+        assert page == 0 and more is False and len(weeks) == 2
+        assert weeks[0][1][0][1:] == (0, 0)
+        assert weeks[1][1][0][1:] == (500, 1200)
