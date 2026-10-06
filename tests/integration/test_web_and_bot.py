@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from aiogram import Bot
-from aiogram.methods import EditMessageText, SendMessage
+from aiogram.methods import EditMessageReplyMarkup, EditMessageText, SendMessage
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, update
 
@@ -53,11 +53,23 @@ class BotDriver:
         self.next_update = 100
 
     def screen(self, user_id: int):
-        return next(
-            call
-            for call in reversed(self.api.calls)
-            if isinstance(call, (SendMessage, EditMessageText)) and int(call.chat_id) == user_id
+        calls = [call for call in self.api.calls if getattr(call, "chat_id", None) == user_id]
+        text_call = next(
+            call for call in reversed(calls) if isinstance(call, (SendMessage, EditMessageText))
         )
+        last = next(
+            call
+            for call in reversed(calls)
+            if isinstance(call, (SendMessage, EditMessageText, EditMessageReplyMarkup))
+        )
+        if isinstance(last, EditMessageReplyMarkup):
+            return EditMessageText(
+                text=text_call.text,
+                chat_id=user_id,
+                message_id=last.message_id,
+                reply_markup=last.reply_markup,
+            )
+        return text_call
 
     async def put(self, payload: dict) -> None:
         self.next_update += 1

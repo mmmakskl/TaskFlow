@@ -7,6 +7,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from app.bot.ack import answer_callback
+from app.bot.middlewares.interaction import (
+    adopt_entry_message,
+    callback_warning,
+    draft_valid,
+    input_warning,
+)
+from app.bot.render import discard_input, render, reset, validation_error
 from app.config.settings import Settings
 from app.repositories.base import Repository
 from app.repositories.results import ResultRepository
@@ -62,14 +69,51 @@ class AccessMiddleware(BaseMiddleware):
         )
         data["settings_service"] = SettingsService(repo, self.settings)
         state: FSMContext = data["state"]
+        current = await state.get_state()
+        if not draft_valid(current, await state.get_data()):
+            await reset(state, keep_navigation=False)
+            text, markup = await data["ui"].menu(data["actor"])
+            await render(
+                data["bot"],
+                chat.id,
+                state,
+                "♻️ Черновик сброшен. Начни действие заново.\n\n" + text,
+                markup,
+            )
+            if isinstance(event, CallbackQuery):
+                await answer_callback(event, "Меню восстановлено.")
+            return None
+        warning = (
+            await callback_warning(event, state)
+            if isinstance(event, CallbackQuery)
+            else await input_warning(event, state, known_command=bool(data.get("command")))
+            if isinstance(event, Message)
+            else None
+        )
+        if warning:
+            if isinstance(event, CallbackQuery):
+                await answer_callback(event, warning, show_alert=True)
+            elif isinstance(event, Message):
+                if not (await state.get_data()).get("screen_markup"):
+                    await render(data["bot"], chat.id, state, *await data["ui"].menu(data["actor"]))
+                await validation_error(data["bot"], chat.id, state, warning)
+                await discard_input(event)
+            return None
+        adopted = (
+            await adopt_entry_message(event, data["bot"], state)
+            if isinstance(event, CallbackQuery)
+            else False
+        )
         try:
             async with session.begin_nested():
                 return await handler(event, data)
         except DomainError as exc:
             if isinstance(event, CallbackQuery):
                 await answer_callback(event, str(exc), show_alert=True)
+                if adopted:
+                    await reset(state)
+                    await render(data["bot"], chat.id, state, *await data["ui"].menu(data["actor"]))
             elif isinstance(event, Message):
-                from app.bot.render import validation_error
-
                 await validation_error(data["bot"], chat.id, state, str(exc))
+                await discard_input(event)
             return None

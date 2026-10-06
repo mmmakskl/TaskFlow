@@ -1,16 +1,23 @@
+import logging
 from html import escape
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, Message
 
 from app.services.rules import DomainError
 
 
 def safe(value: Any) -> str:
     return escape(str(value))
+
+
+def short(value: str, maximum: int) -> str:
+    """Keep button labels on one line; full text remains in details."""
+    text = " ".join(value.split())
+    return text if len(text) <= maximum else text[: maximum - 1].rstrip() + "…"
 
 
 def progress(score: int, target: int) -> str:
@@ -26,20 +33,29 @@ async def render(
     message_id = data.get("message_id")
     if message_id:
         try:
-            await bot.edit_message_text(
-                text=text,
-                chat_id=chat_id,
-                message_id=int(message_id),
-                reply_markup=markup,
-                parse_mode="HTML",
+            if data.get("rendered_text") == text:
+                await bot.edit_message_reply_markup(
+                    chat_id=chat_id, message_id=int(message_id), reply_markup=markup
+                )
+            else:
+                await bot.edit_message_text(
+                    text=text,
+                    chat_id=chat_id,
+                    message_id=int(message_id),
+                    reply_markup=markup,
+                    parse_mode="HTML",
+                )
+            await state.update_data(
+                screen_text=text, rendered_text=text, screen_markup=markup.model_dump(mode="json")
             )
-            await state.update_data(screen_text=text, screen_markup=markup.model_dump(mode="json"))
             return
         except TelegramBadRequest as exc:
             error = str(exc).lower()
             if "message is not modified" in error:
                 await state.update_data(
-                    screen_text=text, screen_markup=markup.model_dump(mode="json")
+                    screen_text=text,
+                    rendered_text=text,
+                    screen_markup=markup.model_dump(mode="json"),
                 )
                 return
             if not any(
@@ -55,14 +71,20 @@ async def render(
     await state.update_data(
         message_id=message.message_id,
         screen_text=text,
+        rendered_text=text,
         screen_markup=markup.model_dump(mode="json"),
     )
 
 
-async def reset(state: FSMContext, **data: Any) -> None:
+NAVIGATION_KEYS = ("filter", "page", "types_page", "penalty_page", "results_offset")
+SCREEN_KEYS = ("message_id", "screen_text", "screen_markup", "rendered_text")
+
+
+async def reset(state: FSMContext, keep_navigation: bool = True, **data: Any) -> None:
     previous = await state.get_data()
+    keys = SCREEN_KEYS + (NAVIGATION_KEYS if keep_navigation else ())
     await state.set_state(None)
-    await state.set_data({"message_id": previous.get("message_id"), **data})
+    await state.set_data({**{key: previous[key] for key in keys if key in previous}, **data})
 
 
 async def require_current(
@@ -90,3 +112,11 @@ async def validation_error(bot: Bot, chat_id: int, state: FSMContext, error: str
     await render(bot, chat_id, state, text, markup)
     # Keep the original prompt, so repeated errors never accumulate in the message.
     await state.update_data(screen_text=base)
+
+
+async def discard_input(message: Message) -> None:
+    """Chat cleanup is optional: a network failure must never undo a saved action."""
+    try:
+        await message.delete()
+    except (TelegramAPIError, TelegramNetworkError):
+        logging.getLogger(__name__).debug("input_cleanup_failed")

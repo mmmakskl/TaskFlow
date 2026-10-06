@@ -10,7 +10,7 @@ COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
 RUN pip-audit -r requirements.txt --disable-pip --no-deps
-RUN ruff check app tests alembic && ruff format --check app tests alembic && mypy app
+RUN ruff check app tests alembic tools && ruff format --check app tests alembic tools && mypy app
 RUN install -d -o postgres /tmp/taskflow-pg && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/initdb -D /tmp/taskflow-pg -A trust --encoding=UTF8 && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/pg_ctl -D /tmp/taskflow-pg -l /tmp/taskflow-pg.log -o "-h 127.0.0.1" start && \

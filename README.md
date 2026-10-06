@@ -16,7 +16,7 @@ Example menu: `🎯 НЕДЕЛЯ • Макс 7350 / 10000 • Вика 6900 / 1
 
 ## Architecture
 
-`Telegram → FastAPI webhook → PostgreSQL inbox → aiogram handlers → services → repositories → PostgreSQL`. A worker processes updates transactionally and sends outbox notifications. There is no separate REST business API, JWT or Redis. See [architecture](docs/ARCHITECTURE.md), [data model](docs/DATA_MODEL.md), [product flows](docs/PRODUCT.md) and [open-source attribution](docs/OPEN_SOURCE.md). Mobile form behavior is documented in [UX](docs/UX.md).
+`Telegram → FastAPI webhook → PostgreSQL inbox → aiogram handlers → services → repositories → PostgreSQL`. A worker processes updates transactionally and sends outbox notifications. There is no separate REST business API, JWT or Redis. See [architecture](docs/ARCHITECTURE.md), [data model](docs/DATA_MODEL.md), [product flows](docs/PRODUCT.md) and [open-source attribution](docs/OPEN_SOURCE.md). Mobile form behavior is documented in [UX](docs/UX.md); [UX acceptance](docs/UX_ACCEPTANCE.md) includes a local phone-width preview and the manual checklist.
 
 ## Local setup
 

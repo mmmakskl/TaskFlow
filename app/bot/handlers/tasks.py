@@ -1,15 +1,14 @@
-from contextlib import suppress
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
-from app.bot.handlers.common import form, show, step
+from app.bot.handlers.common import confirm_action, confirmed_action, form, show, show_task, step
 from app.bot.handlers.task_prompts import (
     comment_prompt,
     deadline_prompt,
@@ -18,18 +17,22 @@ from app.bot.handlers.task_prompts import (
 )
 from app.bot.keyboards.common import button, inline_calendar, keyboard
 from app.bot.keyboards.forms import controls
-from app.bot.render import render, require_current, reset, safe
+from app.bot.render import discard_input, render, require_current, reset, safe
 from app.bot.states.forms import RatingForm, TaskForm
 from app.models import User
 from app.services.rules import DomainError, estimated_minutes, text_field
 from app.services.tasks import TaskService
 from app.services.ui import UIService
-from app.utils.duration import duration
 from app.utils.time import utcnow
 
 
 async def save_task(
-    bot: Bot, actor: User, state: FSMContext, service: TaskService, comment: str | None
+    bot: Bot,
+    actor: User,
+    state: FSMContext,
+    service: TaskService,
+    comment: str | None,
+    ui: UIService,
 ) -> None:
     data = await state.get_data()
     deadline = datetime.fromisoformat(data["deadline"]) if data.get("deadline") else None
@@ -37,16 +40,7 @@ async def save_task(
         actor, data["title"], data["key"], comment, deadline, data.get("estimated_minutes")
     )
     await reset(state)
-    await render(
-        bot,
-        actor.telegram_id,
-        state,
-        f"✅ <b>Задача создана</b>\n\n📝 {safe(task.title)}\n👤 {safe(actor.display_name)}\n⭐ ждёт оценки второго пользователя\n📅 {'Без дедлайна' if not deadline else deadline.strftime('%d.%m.%Y')}\n⏱ План: {('~' + duration(task.estimated_minutes)) if task.estimated_minutes else 'не указан'}",
-        keyboard(
-            [button("📋 К задачам", "list", value="active")],
-            [button("➕ Ещё задачу", "new"), button("🏠 Меню", "menu")],
-        ),
-    )
+    await show(await ui.task_created(actor, task), bot, actor.telegram_id, state)
 
 
 async def new_task(query: CallbackQuery, bot: Bot, state: FSMContext, actor: User) -> None:
@@ -58,8 +52,7 @@ async def new_task(query: CallbackQuery, bot: Bot, state: FSMContext, actor: Use
 async def title_input(message: Message, bot: Bot, state: FSMContext, actor: User) -> None:
     title = text_field(message.text or "", 200, "Название")
     await state.update_data(title=title)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await discard_input(message)
     await deadline_prompt(bot, actor, state)
 
 
@@ -84,7 +77,7 @@ async def task_form_callback(
         try:
             month = date.fromisoformat(action.value) if action.value else today
             flow = await step(state, TaskForm.deadline)
-            markup = inline_calendar(month.year, month.month, flow)
+            markup = inline_calendar(month.year, month.month, flow, today)
         except ValueError:
             raise DomainError("Недопустимая дата.") from None
         await render(bot, actor.telegram_id, state, "📅 Выбери дату дедлайна:", markup)
@@ -109,7 +102,7 @@ async def task_form_callback(
         if data.get("edit_id"):
             await task_service.edit(actor, data["edit_id"], data["edit_version"], deadline=selected)
             await reset(state)
-            await show(await ui.task_details(actor, data["edit_id"]), bot, actor.telegram_id, state)
+            await show_task(ui, actor, data["edit_id"], bot, state)
         else:
             await state.update_data(deadline=selected.isoformat() if selected else None)
             await estimate_prompt(bot, actor, state)
@@ -123,7 +116,7 @@ async def task_form_callback(
             keyboard(controls("task_back", flow, "comment")),
         )
     else:
-        await save_task(bot, actor, state, task_service, None)
+        await save_task(bot, actor, state, task_service, None, ui)
     await answer_callback(
         query,
     )
@@ -137,7 +130,7 @@ async def accept_estimate(
     if data.get("edit_id"):
         await service.edit(actor, data["edit_id"], data["edit_version"], estimated_minutes=estimate)
         await reset(state)
-        await show(await ui.task_details(actor, data["edit_id"]), bot, actor.telegram_id, state)
+        await show_task(ui, actor, data["edit_id"], bot, state)
     else:
         await state.update_data(estimated_minutes=estimate)
         await comment_prompt(bot, actor, state)
@@ -155,8 +148,7 @@ async def estimate_input(
     if not text.isdecimal() or len(text) > 5:
         raise DomainError("Введи длительность в минутах: целое число от 1 до 10 080.")
     await accept_estimate(bot, actor, state, task_service, ui, int(text))
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await discard_input(message)
 
 
 async def task_draft_callback(
@@ -170,7 +162,13 @@ async def task_draft_callback(
 ) -> None:
     action = callback_data
     current = await state.get_state()
-    if action.name == "task_estimate":
+    if action.name == "task_save":
+        data = await require_current(state, TaskForm.deadline.state, action.version)
+        if data.get("edit_id"):
+            raise DomainError("Эта кнопка устарела.")
+        await state.update_data(deadline=None, estimated_minutes=None)
+        await save_task(bot, actor, state, task_service, None, ui)
+    elif action.name == "task_estimate":
         data = await require_current(state, TaskForm.estimate.state, action.version)
         if action.value == "none":
             value = None
@@ -181,6 +179,13 @@ async def task_draft_callback(
         else:
             raise DomainError("Недопустимая длительность.")
         await accept_estimate(bot, actor, state, task_service, ui, value)
+    elif action.name == "task_clear":
+        data = await require_current(state, TaskForm.edit.state, action.version)
+        if data.get("field") != "comment":
+            raise DomainError("Эта кнопка устарела.")
+        await task_service.edit(actor, data["edit_id"], data["edit_version"], comment=None)
+        await reset(state)
+        await show_task(ui, actor, data["edit_id"], bot, state)
     elif action.name == "task_title_keep":
         data = await require_current(state, TaskForm.title.state, action.version)
         if not data.get("title"):
@@ -222,12 +227,16 @@ async def task_draft_callback(
 
 
 async def comment_input(
-    message: Message, bot: Bot, state: FSMContext, actor: User, task_service: TaskService
+    message: Message,
+    bot: Bot,
+    state: FSMContext,
+    actor: User,
+    task_service: TaskService,
+    ui: UIService,
 ) -> None:
     comment = text_field(message.text or "", 1500, "Комментарий")
-    await save_task(bot, actor, state, task_service, comment)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await save_task(bot, actor, state, task_service, comment, ui)
+    await discard_input(message)
 
 
 async def task_actions(
@@ -247,7 +256,7 @@ async def task_actions(
             raise DomainError("Недопустимая оценка.") from None
         await task_service.rate(actor, action.entity, value, action.version)
         await reset(state)
-        await show(await ui.rating(actor), bot, actor.telegram_id, state)
+        await show(await ui.rating(actor, action.entity), bot, actor.telegram_id, state)
     elif action.name == "custom_rate":
         task = await task_service.view(actor, action.entity)
         if (
@@ -266,29 +275,33 @@ async def task_actions(
             keyboard([button("⬅️ К оценке", "ratings", task.id - 1), button("🏠 Меню", "menu")]),
         )
     elif action.name in ("status", "status_confirm"):
+        confirmation = (
+            await confirmed_action(state, action) if action.name == "status_confirm" else None
+        )
+        target = confirmation["target"] if confirmation else action.value
         task = await task_service.view(actor, action.entity)
         if task.version != action.version:
             raise DomainError("Эта кнопка устарела. Обнови задачу.")
-        if action.name == "status" and (task.status == "DONE" or action.value == "CANCELLED"):
+        if action.name == "status" and (task.status == "DONE" or target == "CANCELLED"):
+            confirm = await confirm_action(
+                state, "status_confirm", task.id, task.version, target=target
+            )
             await render(
                 bot,
                 actor.telegram_id,
                 state,
-                "⚠️ Подтвердить изменение задачи?\nЭто действие может изменить результаты недели.",
+                ui.status_confirmation(task, target),
                 keyboard(
-                    [
-                        button(
-                            "✅ Подтвердить", "status_confirm", task.id, task.version, action.value
-                        )
-                    ],
+                    [("✅ Подтвердить", confirm.pack())],
                     [button("❌ Отмена", "task", task.id)],
                 ),
             )
         else:
             await task_service.change_status(
-                actor, task.id, action.value, action.version, action.name == "status_confirm"
+                actor, task.id, target, action.version, action.name == "status_confirm"
             )
-            await show(await ui.task_details(actor, task.id), bot, actor.telegram_id, state)
+            await reset(state)
+            await show_task(ui, actor, task.id, bot, state)
     elif action.name == "edit":
         task = await task_service.view(actor, action.entity)
         if task.owner_user_id != actor.id or task.status in ("DONE", "CANCELLED"):
@@ -336,22 +349,27 @@ async def task_actions(
         elif action.value == "estimated_minutes":
             await estimate_prompt(bot, actor, state)
         else:
-            await state.set_state(TaskForm.edit)
+            flow = await step(state, TaskForm.edit)
             text = (
                 "✏️ Напиши новое название:"
                 if action.value == "title"
                 else "💬 Напиши комментарий. Отправь «—», чтобы убрать его:"
             )
+            rows = []
+            if action.value == "comment":
+                text += f"\n\nСейчас: {safe(task.comment or '—')}"
+                rows.append([button("🧹 Убрать комментарий", "task_clear", version=flow)])
             await render(
                 bot,
                 actor.telegram_id,
                 state,
                 text,
                 keyboard(
+                    *rows,
                     [
                         button("⬅️ Назад", "edit", task.id, task.version),
                         button("❌ Отмена", "task", task.id),
-                    ]
+                    ],
                 ),
             )
     await answer_callback(
@@ -373,9 +391,8 @@ async def custom_rating(
     data = await state.get_data()
     await task_service.rate(actor, data["task_id"], int(text), data["task_version"])
     await reset(state)
-    await show(await ui.rating(actor), bot, actor.telegram_id, state)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await show(await ui.rating(actor, data["task_id"]), bot, actor.telegram_id, state)
+    await discard_input(message)
 
 
 async def edit_input(
@@ -392,9 +409,8 @@ async def edit_input(
     change = None if field == "comment" and value.strip() == "—" else value
     await task_service.edit(actor, data["edit_id"], data["edit_version"], **{field: change})
     await reset(state)
-    await show(await ui.task_details(actor, data["edit_id"]), bot, actor.telegram_id, state)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await show_task(ui, actor, data["edit_id"], bot, state)
+    await discard_input(message)
 
 
 def create_router() -> Router:
@@ -404,13 +420,15 @@ def create_router() -> Router:
     created.message.register(estimate_input, TaskForm.estimate)
     created.callback_query.register(
         task_draft_callback,
-        Action.filter(F.name.in_({"task_back", "task_estimate", "task_title_keep"})),
+        Action.filter(
+            F.name.in_({"task_back", "task_estimate", "task_title_keep", "task_save", "task_clear"})
+        ),
     )
     created.callback_query.register(
         task_form_callback,
         Action.filter(F.name.in_({"calendar", "deadline", "comment_add", "comment_skip"})),
     )
-    created.message.register(comment_input, TaskForm.comment)
+    created.message.register(comment_input, StateFilter(TaskForm.comment, TaskForm.comment_choice))
     created.callback_query.register(
         task_actions,
         Action.filter(

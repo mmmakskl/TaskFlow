@@ -55,3 +55,28 @@ presets, invalid input recovery, stale confirmation, estimate editing/removal,
 permissions, audit snapshots and upgrading a populated revision-0001 schema.
 Run `docker build --target test -t taskflow:test .` or `make check` with a disposable
 `TEST_DATABASE_URL` ending in `_test`.
+
+## Current navigation and recovery
+
+After a title, “Создать без деталей” finishes in one tap. Comments may be typed directly on the
+optional-comment screen. Task filters/pages survive editing and status changes. Active filters and
+page totals are visible; long labels use ellipses. Five full-width task buttons carry status, points
+and planned effort (or deadline); the task titles are not repeated in the message body. The screen
+also totals planned effort for its page, and filters occupy two rows. The rating queue advances from the task just rated.
+
+Reopen/cancel, penalty deletion and type disabling require a current FSM confirmation nonce. Leaving
+the confirmation invalidates it even when entity version has not changed. Enabling a disabled type
+needs one tap. Comment/description editors offer inline removal buttons.
+
+Unknown commands, media and text on choice screens retain current controls. `/menu` exits a form.
+Missing/corrupt draft data restores the dashboard. Non-navigation callbacks from old message IDs are
+rejected. Deleted/uneditable UI messages are replaced; identical text uses `edit_reply_markup`.
+Optional input-message cleanup cannot undo saved business actions if Telegram/network fails.
+
+See [UX_ACCEPTANCE.md](UX_ACCEPTANCE.md) for the automated matrix, local mobile harness and exact
+remaining real-phone acceptance limitations.
+
+Notification and old-menu navigation adopts the clicked message as the current UI and retires the
+previous keyboard. This keeps the opened screen where the user is looking, without sending another
+message. Mutating callbacks from the retired message are rejected. A mutation must also match a button on the
+current keyboard, so an old cached “Complete” cannot execute after returning to the dashboard.

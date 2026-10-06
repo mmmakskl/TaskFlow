@@ -1,13 +1,11 @@
-from contextlib import suppress
-
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
-from app.bot.handlers.common import form, show, step
+from app.bot.handlers.common import confirm_action, confirmed_action, form, show, step
 from app.bot.handlers.penalty_prompts import (
     comment_choice,
     kind_prompt,
@@ -16,7 +14,7 @@ from app.bot.handlers.penalty_prompts import (
 )
 from app.bot.keyboards.common import button, keyboard
 from app.bot.keyboards.forms import controls
-from app.bot.render import render, require_current, reset, safe
+from app.bot.render import discard_input, render, require_current, reset, safe
 from app.bot.states.forms import PenaltyForm
 from app.models import User
 from app.services.penalties import PenaltyService
@@ -129,22 +127,40 @@ async def penalty_callback(
         )
     elif action.name == "penalty_list":
         await reset(state)
+        await state.update_data(penalty_page=action.entity)
         await show(await ui.penalty_list(actor, action.entity), bot, actor.telegram_id, state)
     elif action.name == "penalty_delete":
+        penalty = await penalty_service.view(actor, action.entity, action.version)
+        target_name = next(
+            (
+                user.display_name
+                for user in await penalty_service.users()
+                if user.id == penalty.target_user_id
+            ),
+            "Участник",
+        )
+        confirm = await confirm_action(
+            state, "penalty_delete_confirm", action.entity, action.version
+        )
+        data = await state.get_data()
         await render(
             bot,
             actor.telegram_id,
             state,
-            "⚠️ Удалить штраф?\nБаллы вернутся в исходной неделе.",
+            f"⚠️ Удалить штраф?\n\n👤 {safe(target_name)}\n{safe(penalty.name_snapshot)} • {points(penalty.points)} баллов\nБаллы вернутся в исходной неделе.",
             keyboard(
-                [button("✅ Удалить", "penalty_delete_confirm", action.entity, action.version)],
-                [button("❌ Отмена", "penalty_list")],
+                [("✅ Удалить", confirm.pack())],
+                [button("❌ Отмена", "penalty_list", data.get("penalty_page", 0))],
             ),
         )
     else:
+        await confirmed_action(state, action)
+        data = await state.get_data()
         await penalty_service.delete(actor, action.entity, action.version, True)
         await reset(state)
-        await show(await ui.penalty_list(actor, 0), bot, actor.telegram_id, state)
+        await show(
+            await ui.penalty_list(actor, data.get("penalty_page", 0)), bot, actor.telegram_id, state
+        )
     await answer_callback(
         query,
     )
@@ -211,8 +227,7 @@ async def penalty_quantity(
     if not text.isdecimal() or len(text) > 10:
         raise DomainError("Введи положительное целое число.")
     await accept_quantity(bot, actor, state, penalty_service, int(text))
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await discard_input(message)
 
 
 async def penalty_comment(
@@ -220,8 +235,7 @@ async def penalty_comment(
 ) -> None:
     await state.update_data(comment=text_field(message.text or "", 1500, "Комментарий"))
     await confirmation(bot, actor, state, penalty_service)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+    await discard_input(message)
 
 
 def create_router() -> Router:
@@ -250,5 +264,7 @@ def create_router() -> Router:
         ),
     )
     created.message.register(penalty_quantity, PenaltyForm.quantity)
-    created.message.register(penalty_comment, PenaltyForm.comment)
+    created.message.register(
+        penalty_comment, StateFilter(PenaltyForm.comment, PenaltyForm.comment_choice)
+    )
     return created

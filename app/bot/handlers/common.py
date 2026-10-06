@@ -10,7 +10,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
-from app.bot.render import render, reset
+from app.bot.render import discard_input, render, require_current, reset
+from app.bot.states.forms import ConfirmationForm
 from app.models import User
 from app.services.rules import DomainError
 from app.services.ui import UIService
@@ -39,8 +40,9 @@ async def show(
 async def menu_command(
     message: Message, bot: Bot, state: FSMContext, actor: User, ui: UIService
 ) -> None:
-    await reset(state)
+    await reset(state, keep_navigation=False)
     await show(await ui.menu(actor), bot, message.chat.id, state)
+    await discard_input(message)
 
 
 async def navigation(
@@ -60,13 +62,14 @@ async def navigation(
         return
     if action.name == "task":
         data = await state.get_data()
+        await reset(state)
         screen = await ui.task_details(
             actor, action.entity, data.get("filter", "active"), data.get("page", 0)
         )
-        await state.set_state(None)
     else:
         await reset(state)
         if action.name == "menu":
+            await reset(state, keep_navigation=False)
             screen = await ui.menu(actor)
         elif action.name == "list":
             filter_name = action.value or "active"
@@ -79,6 +82,7 @@ async def navigation(
                 offset = int(action.value or "0")
             except ValueError:
                 raise DomainError("Недопустимая неделя.") from None
+            await state.update_data(results_offset=offset)
             screen = await ui.results_screen(offset)
         elif action.name == "history":
             screen = await ui.history(action.entity)
@@ -88,6 +92,45 @@ async def navigation(
         query,
     )
     await show(screen, bot, chat_id, state)
+
+
+async def show_task(ui: UIService, actor: User, task_id: int, bot: Bot, state: FSMContext) -> None:
+    data = await state.get_data()
+    await show(
+        await ui.task_details(actor, task_id, data.get("filter", "active"), data.get("page", 0)),
+        bot,
+        actor.telegram_id,
+        state,
+    )
+
+
+async def show_type(ui: UIService, actor: User, type_id: int, bot: Bot, state: FSMContext) -> None:
+    data = await state.get_data()
+    await show(
+        await ui.type_details(type_id, data.get("types_page", 0)), bot, actor.telegram_id, state
+    )
+
+
+async def confirm_action(
+    state: FSMContext, name: str, entity: int, version: int, **payload: Any
+) -> Action:
+    flow = await form(
+        state, confirmation={"name": name, "entity": entity, "version": version, **payload}
+    )
+    await state.set_state(ConfirmationForm.action)
+    return Action(name=name, entity=entity, version=version, value=str(flow))
+
+
+async def confirmed_action(state: FSMContext, action: Action) -> dict[str, Any]:
+    data = await require_current(state, ConfirmationForm.action.state)
+    expected = data.get("confirmation", {})
+    if action.value != str(data.get("flow")) or (action.name, action.entity, action.version) != (
+        expected.get("name"),
+        expected.get("entity"),
+        expected.get("version"),
+    ):
+        raise DomainError("Это подтверждение устарело. Повтори действие.")
+    return expected
 
 
 def create_router() -> Router:
