@@ -2,7 +2,7 @@ services:
   - type: web
     name: taskflow
     runtime: docker
-    plan: starter
+    plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
     dockerContext: .

@@ -20,7 +20,7 @@ Create the bot in @BotFather, record its token securely and obtain the two autho
 
 ## 4. Render Web Service
 
-Connect the private GitHub repository. Create a Docker **Web Service**, branch `main`, region Frankfurt, Dockerfile `./Dockerfile`, health path `/ready`, auto-deploy after checks pass. Use the always-on Starter plan for prompt Telegram responses; a Free service sleeps and is unsuitable for predictable production latency. Paid plans require the account owner's payment approval.
+Connect the private GitHub repository. Create a Docker **Web Service**, branch `main`, region Frankfurt, Dockerfile `./Dockerfile`, health path `/ready`, auto-deploy after checks pass. The account owner selected the Free plan, accepting cold-start delays after inactivity. Starter is an optional paid upgrade when predictable latency is needed; do not upgrade without payment approval.
 
 Alternatively use the checked-in `render.yaml` Blueprint. Generate `WEBHOOK_SECRET`; fill BOT_TOKEN, DATABASE_URL, USER_MAX_ID and USER_VIKA_ID as secrets. Set WEBHOOK_BASE_URL to the assigned `https://SERVICE.onrender.com` origin. Set names, Europe/Helsinki, target 10000, cooldown 60, debounce 5, ENVIRONMENT=production and LOG_LEVEL=INFO. REGISTER_WEBHOOK defaults true.
 

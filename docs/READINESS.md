@@ -17,3 +17,5 @@ Deployment, GitHub Actions result, real Telegram acceptance and persistence afte
 ## Design limits
 
 Notifications favor at-most-once send attempts over guaranteed delivery after ambiguous network failures. Historical target display uses current preferences. Shared scoring timezone changes reinterpret historical week boundaries. The two-user worker intentionally serializes updates; no scale claims are made. Supabase backup retention depends on the selected account plan.
+
+- Hosting decision: user explicitly selected Render Free, accepting cold-start delays. Service `srv-db2mk82d0e5s73bm4sog` is linked to private GitHub main in Frankfurt.

@@ -13,3 +13,5 @@
 - Expanded checkpoint: 53 PostgreSQL tests passed, including actual Uvicorn start/stop/restart persistence; production Docker image built; pip-audit found no known runtime dependency vulnerabilities. Subsequent review fixes await full rerun.
 
 - Final correction pass:59/59 PostgreSQL tests green; Ruff/mypy and runtime dependency audit pass. SQL parameters/server DETAIL hidden; expired acknowledgments do not roll back mutations.
+
+- Ruling: use user-selected Render Free — owner declined paid always-on plan — cost if wrong: cold-start delays, later paid upgrade needs approval.

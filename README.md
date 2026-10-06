@@ -71,7 +71,7 @@ Production Docker runs Alembic before Uvicorn as a non-root user. `docker compos
 
 ## Production
 
-[Deployment](docs/DEPLOYMENT.md) describes private GitHub → Supabase → Render setup. `render.yaml` defines an always-on Docker Web Service with `/ready` health checks and deployment after CI checks. Startup creates/synchronizes users and seeds penalty types idempotently, then registers `/telegram/webhook` with Telegram. Supabase tables are created exclusively by Alembic.
+[Deployment](docs/DEPLOYMENT.md) describes private GitHub → Supabase → Render setup. `render.yaml` defines a Docker Web Service on the user-selected Free plan with `/ready` health checks and deployment after CI checks. Startup creates/synchronizes users and seeds penalty types idempotently, then registers `/telegram/webhook` with Telegram. Supabase tables are created exclusively by Alembic.
 
 ## Troubleshooting
 
