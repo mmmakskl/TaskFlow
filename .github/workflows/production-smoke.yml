@@ -1,0 +1,32 @@
+name: Production HTTP smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/production-smoke.yml
+      - docs/READINESS.md
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ vars.PRODUCTION_BASE_URL || 'https://taskflow-private.onrender.com' }}
+    steps:
+      - name: Check live health, readiness and webhook rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 10 --max-time 90 "$BASE_URL/health" > health.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 10 --max-time 90 "$BASE_URL/ready" > ready.json
+          status=$(curl --silent --show-error --max-time 90 -o webhook.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' --data '{"update_id":1}' "$BASE_URL/telegram/webhook")
+          test "$status" = 403
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path('health.json').read_text()) == {'status': 'ok'}
+          assert json.loads(Path('ready.json').read_text()) == {'status': 'ready'}
+          assert json.loads(Path('webhook.json').read_text()) == {'detail': 'Forbidden'}
+          print('Production HTTPS health/ready passed; unauthorized webhook POST returned403.')
+          PY

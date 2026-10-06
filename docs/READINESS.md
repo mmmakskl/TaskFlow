@@ -19,3 +19,10 @@ Deployment, GitHub Actions result, real Telegram acceptance and persistence afte
 Notifications favor at-most-once send attempts over guaranteed delivery after ambiguous network failures. Historical target display uses current preferences. Shared scoring timezone changes reinterpret historical week boundaries. The two-user worker intentionally serializes updates; no scale claims are made. Supabase backup retention depends on the selected account plan.
 
 - Hosting decision: user explicitly selected Render Free, accepting cold-start delays. Service `srv-db2mk82d0e5s73bm4sog` is linked to private GitHub main in Frankfurt.
+
+## First live deployment
+
+- Render deployed commit045dfbc successfully; startup completed against Supabase and registered Telegram webhook. Public origin: https://taskflow-private.onrender.com.
+- GitHub Actions run37535209965 passed install, lint, types, real PostgreSQL16 tests, dependency audit and Docker build.
+- Browser observed /health `{"status":"ok"}`. /ready and production HTTP smoke checks are in progress.
+- Desktop Telegram automation was rejected by automatic approval review ("Computer Use was not approved to use Telegram"). Real two-account chat acceptance requires the users' input; requested Max /start and a smoke task, Vika /start and500-point rating.
