@@ -33,3 +33,13 @@ mid-operation failures, shared-zone/DST boundaries and negative scores. PostgreS
 concurrent mutation winners, immutable snapshots/events, query indexes, bounded pagination, metadata
 drift, clean migration startup and concurrent migrators. Revision 0003 downgrade/upgrade compares all
 persisted business rows; destructive downgrades and invalid legacy upgrades must fail atomically.
+
+## Mobile interaction regression
+
+`tests/integration/test_mobile_ux.py` covers fast creation, direct optional input, rating queue order,
+retained filter/page context, expired/cancelled confirmations, interrupted FSM, unexpected commands
+and media, malformed callbacks, deleted menu replacement, long HTML-safe content, one-tap enabling
+and clearing optional fields. Unit tests isolate renderer/interaction guards. Run these together with
+existing handler tests and the business gate. Optional deleteMessage network failures are injected
+to prove chat cleanup cannot roll back saved data. Manual evidence is recorded separately in
+[UX_ACCEPTANCE.md](UX_ACCEPTANCE.md).

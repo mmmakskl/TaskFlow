@@ -59,7 +59,7 @@ async def comment_choice(bot: Bot, actor: User, state: FSMContext) -> None:
     data = await state.get_data()
     flow = await step(state, PenaltyForm.comment_choice)
     rows = []
-    text = "💬 <b>Комментарий к штрафу</b>\n\nДобавить пояснение?"
+    text = "💬 <b>Комментарий к штрафу</b>\n\nНапиши пояснение сюда или пропусти этот шаг."
     if data.get("comment"):
         text += f"\n\nСейчас: {safe(data['comment'])}"
         rows.append([button("Оставить комментарий", "penalty_comment_keep", version=flow)])

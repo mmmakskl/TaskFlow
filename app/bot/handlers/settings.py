@@ -1,17 +1,14 @@
-from contextlib import suppress
-
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
-from app.bot.handlers.common import form, show, step
+from app.bot.handlers.common import confirm_action, confirmed_action, form, show, show_type, step
 from app.bot.handlers.settings_prompts import TIMEZONES, setting_prompt, type_prompt
 from app.bot.keyboards.common import button, keyboard
-from app.bot.render import render, require_current, reset
+from app.bot.render import discard_input, render, require_current, reset, safe
 from app.bot.states.forms import SettingsForm
 from app.models import User
 from app.services.penalties import PenaltyService
@@ -40,7 +37,7 @@ async def save_kind(
             rate=data["rate"],
         )
     await reset(state)
-    await show(await ui.type_details(kind.id), bot, actor.telegram_id, state)
+    await show_type(ui, actor, kind.id, bot, state)
 
 
 async def settings_callback(
@@ -55,10 +52,11 @@ async def settings_callback(
     action = callback_data
     if action.name == "types":
         await reset(state)
+        await state.update_data(types_page=action.entity)
         await show(await ui.penalty_types(action.entity, True), bot, actor.telegram_id, state)
     elif action.name == "type_view":
         await reset(state)
-        await show(await ui.type_details(action.entity), bot, actor.telegram_id, state)
+        await show_type(ui, actor, action.entity, bot, state)
     elif action.name == "type_new":
         await form(state)
         await type_prompt(bot, actor, state, "name")
@@ -69,19 +67,22 @@ async def settings_callback(
         if action.value == "calculation_type":
             await type_prompt(bot, actor, state, "method")
         else:
-            await step(state, SettingsForm.type_edit)
+            flow = await step(state, SettingsForm.type_edit)
             labels = {
                 "name": "название",
                 "emoji": "emoji",
                 "description": "описание",
                 "rate": "ставку в баллах",
             }
+            rows = []
+            if action.value == "description":
+                rows.append([button("🧹 Убрать описание", "type_clear", version=flow)])
             await render(
                 bot,
                 actor.telegram_id,
                 state,
                 f"✏️ Изменить {labels[action.value]}\n\nВведи новое значение:",
-                keyboard([button("⬅️ К типу штрафа", "type_view", action.entity)]),
+                keyboard(*rows, [button("⬅️ К типу штрафа", "type_view", action.entity)]),
             )
     elif action.name == "type_method":
         await require_current(state, SettingsForm.type_method.state, action.version)
@@ -94,22 +95,34 @@ async def settings_callback(
         else:
             await type_prompt(bot, actor, state, "rate")
     elif action.name == "type_toggle":
+        kind = await penalty_service.kind(action.entity)
+        if kind.version != action.version:
+            raise DomainError("Тип штрафа изменился. Обнови его экран.")
+        if not kind.is_active:
+            await penalty_service.configure(actor, kind.id, action.version, is_active=True)
+            await reset(state)
+            await show_type(ui, actor, kind.id, bot, state)
+            await answer_callback(query)
+            return
+        confirm = await confirm_action(state, "type_toggle_confirm", action.entity, action.version)
         await render(
             bot,
             actor.telegram_id,
             state,
-            "⚠️ Изменить доступность типа штрафа?\nСтарые штрафы сохранят свои баллы.",
+            f"⚠️ Выключить {safe(kind.name)}?\n\nНовые штрафы этого типа будут недоступны.\nСтарые штрафы сохранят свои баллы.",
             keyboard(
-                [button("✅ Подтвердить", "type_toggle_confirm", action.entity, action.version)],
+                [("✅ Подтвердить", confirm.pack())],
                 [button("❌ Отмена", "type_view", action.entity)],
             ),
         )
     elif action.name == "type_toggle_confirm":
+        await confirmed_action(state, action)
         kind = await penalty_service.kind(action.entity)
         await penalty_service.configure(
             actor, kind.id, action.version, is_active=not kind.is_active
         )
-        await show(await ui.type_details(kind.id), bot, actor.telegram_id, state)
+        await reset(state)
+        await show_type(ui, actor, kind.id, bot, state)
     else:
         if action.value not in ("timezone", "weekly_target"):
             raise DomainError("Недопустимая настройка.")
@@ -144,6 +157,15 @@ async def settings_draft_callback(
         await settings_service.change(actor, field, value)
         await reset(state)
         await show(await ui.settings_screen(actor), bot, actor.telegram_id, state)
+    elif action.name == "type_clear":
+        data = await require_current(state, SettingsForm.type_edit.state, action.version)
+        if data.get("field") != "description":
+            raise DomainError("Эта кнопка устарела.")
+        kind = await penalty_service.configure(
+            actor, data["type_id"], data["type_version"], description=""
+        )
+        await reset(state)
+        await show_type(ui, actor, kind.id, bot, state)
     elif action.name == "type_rate_value":
         await require_current(state, SettingsForm.type_rate.state, action.version)
         if not action.value.isdecimal() or len(action.value) > 7:
@@ -182,7 +204,7 @@ async def settings_draft_callback(
         data = await require_current(state, current, action.version)
         if data.get("type_id") and current == SettingsForm.type_method.state:
             await reset(state)
-            await show(await ui.type_details(data["type_id"]), bot, actor.telegram_id, state)
+            await show_type(ui, actor, data["type_id"], bot, state)
         else:
             await type_prompt(bot, actor, state, previous[current])
     await answer_callback(query)
@@ -230,9 +252,8 @@ async def settings_input(
             actor, data["type_id"], data["type_version"], **{data["field"]: value}
         )
         await reset(state)
-        await show(await ui.type_details(kind.id), bot, actor.telegram_id, state)
-    with suppress(TelegramBadRequest):
-        await message.delete()
+        await show_type(ui, actor, kind.id, bot, state)
+    await discard_input(message)
 
 
 def create_router() -> Router:
@@ -241,7 +262,14 @@ def create_router() -> Router:
         settings_draft_callback,
         Action.filter(
             F.name.in_(
-                {"settings_back", "setting_value", "type_rate_value", "type_skip", "type_keep"}
+                {
+                    "settings_back",
+                    "setting_value",
+                    "type_rate_value",
+                    "type_skip",
+                    "type_keep",
+                    "type_clear",
+                }
             )
         ),
     )

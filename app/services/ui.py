@@ -3,12 +3,26 @@ from zoneinfo import ZoneInfo
 from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.keyboards.common import button, keyboard, pager
-from app.bot.render import progress, safe
+from app.bot.render import progress, safe, short
 from app.models import PenaltyType, Task, User
 from app.services.penalties import PenaltyService
 from app.services.results import ResultService
+from app.services.rules import DomainError
 from app.services.tasks import TaskService
 from app.utils.duration import duration
+
+FILTER_LABELS = {
+    "active": "Активные",
+    "work": "В работе",
+    "backlog": "Ждут оценки",
+    "done": "Выполненные",
+    "archive": "Архив",
+}
+METHOD_LABELS = {
+    "PER_MINUTE": "За минуту",
+    "FIXED": "Фиксированная сумма",
+    "MANUAL": "Вручную при назначении",
+}
 
 STATUS_LABELS = {
     "BACKLOG": "🆕 Ждёт оценки",
@@ -52,6 +66,18 @@ class UIService:
             [button("⚙️ Настройки", "settings")],
         )
 
+    async def task_created(self, actor: User, task: Task) -> tuple[str, InlineKeyboardMarkup]:
+        users = {user.id: user for user in await self.tasks.user_repo.participants()}
+        return (
+            f"✅ <b>Задача создана</b>\n\n📝 {safe(task.title)}\n👤 {safe(actor.display_name)}\n"
+            f"⭐ ждёт оценки: {safe(users[task.evaluator_user_id].display_name)}\n📅 {deadline(task, actor)}\n"
+            f"⏱ План: {('~' + duration(task.estimated_minutes)) if task.estimated_minutes else 'не указан'}",
+            keyboard(
+                [button("📋 К задачам", "list", value="active")],
+                [button("➕ Ещё задачу", "new"), button("🏠 Меню", "menu")],
+            ),
+        )
+
     async def settings_screen(self, actor: User) -> tuple[str, InlineKeyboardMarkup]:
         return (
             f"⚙️ <b>Настройки</b>\n\n👤 {safe(actor.display_name)}\n"
@@ -70,32 +96,43 @@ class UIService:
     ) -> tuple[str, InlineKeyboardMarkup]:
         tasks, count = await self.tasks.repo.list(actor, filter_name, page)
         page = min(page, max(0, (count - 1) // 5))
-        text = f"📋 <b>МОИ ЗАДАЧИ • {count}</b>\n"
+        text = f"📋 <b>МОИ ЗАДАЧИ • {count}</b>\n{FILTER_LABELS[filter_name]}\n"
+        planned = sum(task.estimated_minutes or 0 for task in tasks)
+        if planned:
+            text += f"\n⏱ План на странице: ~{duration(planned)}\n"
         rows = []
         for task in tasks:
             icon = STATUS_LABELS[task.status].split()[0]
-            extra = (
-                "ждёт оценки" if task.rated_points is None else f"⭐ {points(task.rated_points)}"
-            )
-            text += f"\n{icon} {safe(task.title[:70])}\n   {extra}"
-            if task.estimated_minutes is not None:
-                text += f" • ⏱ ~{duration(task.estimated_minutes)}"
-            if task.deadline:
-                text += f" • до {deadline(task, actor)}"
-            text += "\n"
-            rows.append([button(f"{icon} {task.title[:45]}", "task", task.id)])
+            extras = []
+            score = task.awarded_points if task.status == "DONE" else task.rated_points
+            if score is not None and task.status != "CANCELLED":
+                extras.append(f"⭐ {points(score)}")
+            if task.estimated_minutes:
+                extras.append(f"~{duration(task.estimated_minutes)}")
+            elif task.deadline:
+                extras.append(f"до {deadline(task, actor)[:5]}")
+            suffix = (" · " + " · ".join(extras)) if extras else ""
+            title = short(task.title, max(14, 42 - len(suffix)))
+            rows.append([button(f"{icon} {title}{suffix}", "task", task.id)])
         if not tasks:
             text += "\nЗдесь пока нет задач."
-        rows.append(pager("list", page, (page + 1) * 5 < count, filter_name))
-        rows += [
-            [button("Активные", "list", value="active"), button("В работе", "list", value="work")],
-            [
-                button("Ждут оценки", "list", value="backlog"),
-                button("Выполненные", "list", value="done"),
-            ],
-            [button("🚫 Архив", "list", value="archive")],
-            [button("➕ Добавить", "new"), button("🏠 Меню", "menu")],
-        ]
+        else:
+            text += "\nНажми задачу, чтобы открыть детали."
+        rows.append(
+            pager("list", page, (page + 1) * 5 < count, filter_name, max(1, (count + 4) // 5))
+        )
+        for filters in (("active", "work"), ("backlog", "done", "archive")):
+            rows.append(
+                [
+                    button(
+                        ("✓ " if filter_name == name else "") + FILTER_LABELS[name],
+                        "list",
+                        value=name,
+                    )
+                    for name in filters
+                ]
+            )
+        rows.append([button("➕ Добавить", "new"), button("🏠 Меню", "menu")])
         return text, keyboard(*rows)
 
     async def task_details(
@@ -105,7 +142,9 @@ class UIService:
         users = {user.id: user for user in await self.tasks.repo.users()}
         text = f"📝 <b>{safe(task.title)}</b>\n\n👤 {safe(users[task.owner_user_id].display_name)}\n{STATUS_LABELS[task.status]}"
         text += (
-            f"\n⭐ {points(task.rated_points)} баллов" if task.rated_points else "\n⭐ Ждёт оценки"
+            f"\n⭐ {points(task.rated_points)} баллов"
+            if task.rated_points
+            else ("\n⭐ Не оценена" if task.status == "CANCELLED" else "\n⭐ Ждёт оценки")
         )
         text += f"\n📅 {deadline(task, actor)}\n🕒 Создана {task.created_at.astimezone(ZoneInfo(actor.timezone)):%d.%m, %H:%M}"
         text += (
@@ -144,11 +183,25 @@ class UIService:
                     ]
                 )
         elif task.status == "BACKLOG":
-            rows.append([button("⭐ Оценить", "ratings")])
+            rows.append([button("⭐ Оценить", "ratings", task.id - 1)])
+        if task.status == "BACKLOG":
+            rows.append([button("🔄 Обновить", "task", task.id)])
         rows.append(
             [button("⬅️ Назад", "list", back_page, value=back_filter), button("🏠 Меню", "menu")]
         )
         return text, keyboard(*rows)
+
+    @staticmethod
+    def status_confirmation(task: Task, target: str) -> str:
+        if target not in STATUS_LABELS:
+            raise DomainError("Недопустимый статус.")
+        heading = "🚫 Отменить задачу?" if target == "CANCELLED" else "↩️ Открыть задачу снова?"
+        text = f"<b>{heading}</b>\n\n📝 {safe(task.title)}\nБудет: {STATUS_LABELS[target]}"
+        if task.status == "DONE":
+            text += f"\n\nИз результата исходной недели будет убрано {points(task.awarded_points or 0)} баллов."
+        else:
+            text += "\n\nОтменённая задача не начисляет баллы."
+        return text
 
     async def rating(self, actor: User, after: int = 0) -> tuple[str, InlineKeyboardMarkup]:
         task, count = await self.tasks.repo.pending_next(actor, after)
@@ -222,7 +275,7 @@ class UIService:
             rows.append(
                 [
                     button(
-                        f"{kind.emoji} {kind.name[:40]}{rate}{suffix}",
+                        f"{kind.emoji} {short(kind.name, 30)}{rate}{suffix}",
                         "type_view" if settings else "penalty_type",
                         kind.id,
                         kind.version,
@@ -248,9 +301,11 @@ class UIService:
             )
         return text, keyboard(*rows)
 
-    async def type_details(self, type_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    async def type_details(
+        self, type_id: int, back_page: int = 0
+    ) -> tuple[str, InlineKeyboardMarkup]:
         kind = await self.penalties.repo.get(PenaltyType, type_id)
-        text = f"{safe(kind.emoji)} <b>{safe(kind.name)}</b>\n\n{safe(kind.description)}\n\nРасчёт: {kind.calculation_type}\nСтавка: {points(kind.rate)}\n{'✅ Включён' if kind.is_active else '⏸ Выключен'}"
+        text = f"{safe(kind.emoji)} <b>{safe(kind.name)}</b>\n\n{safe(kind.description)}\n\nРасчёт: {METHOD_LABELS[kind.calculation_type]}\nСтавка: {points(kind.rate) if kind.calculation_type != 'MANUAL' else 'указывается при назначении'}\n{'✅ Включён' if kind.is_active else '⏸ Выключен'}"
         rows = [
             [button(label, "type_edit", kind.id, kind.version, field) for label, field in row]
             for row in [
@@ -269,11 +324,14 @@ class UIService:
                 )
             ]
         )
-        rows.append([button("⬅️ Типы штрафов", "types")])
+        rows.append([button("⬅️ Типы штрафов", "types", back_page)])
         return text, keyboard(*rows)
 
     async def penalty_list(self, actor: User, page: int) -> tuple[str, InlineKeyboardMarkup]:
         penalties, has_next = await self.penalties.list(page)
+        if not penalties and page > 0:
+            page = 0
+            penalties, has_next = await self.penalties.list(0)
         users = {user.id: user for user in await self.penalties.repo.users()}
         text = "⚠️ <b>Штрафы</b>\n"
         rows = []
@@ -282,7 +340,7 @@ class UIService:
             rows.append(
                 [
                     button(
-                        f"🗑 {penalty.name_snapshot[:30]} • {points(penalty.points)}",
+                        f"🗑 {short(penalty.name_snapshot, 30)} • {points(penalty.points)}",
                         "penalty_delete",
                         penalty.id,
                         penalty.version,

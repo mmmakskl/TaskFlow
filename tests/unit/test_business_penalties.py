@@ -177,3 +177,18 @@ async def test_configuration_changes_affect_only_new_penalty(business):
     new = await b.penalties.create(b.max, 1, await b.penalties.preview(1, 5, None), "new", True)
     assert snapshot == (old.name_snapshot, old.description_snapshot, old.rate_snapshot, old.points)
     assert new.rate_snapshot == 150 and new.points == 750 and new.name_snapshot == "New name"
+
+
+async def test_penalty_view_requires_authorized_actor_current_version_and_live_row(business):
+    b = business
+    penalty = await b.penalties.create(
+        b.max, 1, await b.penalties.preview(1, 5, None), "view", True
+    )
+    assert await b.penalties.view(b.vika, penalty.id, penalty.version) is penalty
+    with pytest.raises(StaleAction):
+        await b.penalties.view(b.max, penalty.id, 99)
+    with pytest.raises(DomainError):
+        await b.penalties.view(User(id=99, telegram_id=999), penalty.id, penalty.version)
+    await b.penalties.delete(b.max, penalty.id, penalty.version, True)
+    with pytest.raises(StaleAction):
+        await b.penalties.view(b.max, penalty.id, penalty.version)

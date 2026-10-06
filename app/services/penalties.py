@@ -8,7 +8,7 @@ from app.repositories.base import Repository
 from app.repositories.penalties import PenaltyRepository
 from app.schemas.penalties import PenaltyPreview
 from app.services.base import AuthorizedService
-from app.services.rules import DomainError, operation_key, penalty_points, text_field
+from app.services.rules import DomainError, StaleAction, operation_key, penalty_points, text_field
 from app.services.transactions import atomic
 from app.utils.time import utcnow
 
@@ -22,6 +22,14 @@ class PenaltyService(AuthorizedService):
 
     async def kind(self, type_id: int) -> PenaltyType:
         return await self.repo.get(PenaltyType, type_id)
+
+    async def view(self, actor: User, penalty_id: int, version: int) -> Penalty:
+        await self.actor(actor)
+        penalty = await self.repo.get(Penalty, penalty_id)
+        self.repo.version(penalty, version)
+        if penalty.deleted_at:
+            raise StaleAction()
+        return penalty
 
     async def users(self) -> list[User]:
         return await self.user_repo.participants()
