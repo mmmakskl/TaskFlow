@@ -10,6 +10,7 @@ Run `make lint`, `make typecheck` and `make test`. Unit tests need no external s
 - Time: timezone-aware week boundaries, Monday alignment and daylight-saving 167/169-hour weeks.
 - Repositories/services: empty migrations, peer creation/rating/completion, awarded and penalty snapshots, rate changes, reopen reversal, immutable event triggers, idempotent seed, concurrent completion/penalty creation and concurrent notification claims.
 - Telegram: actual aiogram dispatch with mocked HTTP Bot API, durable inbox, one edited UI per user, duplicate and stale callbacks, optional fields, confirmations and unauthorized users.
+- Mobile forms: back traversal, preserved drafts, minute/timezone/target presets, invalid input with retained buttons, stale confirmation rejection, optional effort edits/removal and populated-schema migration.
 - HTTP: health/readiness, secret rejection, duplicate update IDs, invalid bodies and size limits.
 - Recovery: unexpected handler rollback/retry with one safe notification; SQL error privacy; history timezone aggregation and bounded pagination.
 

@@ -9,3 +9,7 @@ We did not copy the reference's polling, separate REST business API, JWT authent
 Other inspected references: `cyrmee/telegram-task-bot` (MIT, group task management), `nxt-am/tg-bot-reminders` (MIT, personal reminders/recurrence), and `sahandsorouri/telegram-checklist-bot` (FastAPI/PostgreSQL/Alembic; no verified license during research). No code from those projects was copied. None provides this two-person peer-rating, immutable scoring and configurable-penalty model directly.
 
 Dependencies are maintained packages installed from pinned requirements. aiogram and FastAPI are MIT; SQLAlchemy/Alembic are MIT; asyncpg is Apache-2.0; PostgreSQL uses the PostgreSQL License. Dependency metadata remains part of installed distributions. This repository does not relicense upstream copied material.
+
+## Mobile form follow-up
+
+Reviewed [namebogsecret/telegram-task-bot](https://github.com/namebogsecret/telegram-task-bot) (MIT) for compact inline task actions and [viskk0/TelegramNotesBot](https://github.com/viskk0/TelegramNotesBot) for task CRUD/navigation. The latter did not expose a verified license, so no code was copied. Neither replaces our transactional PostgreSQL/FSM model. Back navigation, numeric presets and effort estimates are original TaskFlow code; no new framework dependency was introduced.

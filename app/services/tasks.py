@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.config.settings import Settings
 from app.models import Notification, ScoreEvent, Task, User
 from app.repositories.tasks import TaskRepository
-from app.services.rules import DomainError, rating_points, text_field, transition
+from app.services.rules import DomainError, estimated_minutes, rating_points, text_field, transition
 from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ class TaskService:
         key: str,
         comment: str | None = None,
         deadline: datetime | None = None,
+        estimate: int | None = None,
     ) -> Task:
         await self.repo.operation_lock(key)
         existing = await self.repo.by_operation(key)
@@ -46,11 +47,14 @@ class TaskService:
             title=title,
             comment=comment,
             deadline=deadline,
+            estimated_minutes=estimated_minutes(estimate),
             operation_key=key,
         )
         self.repo.session.add(task)
         await self.repo.session.flush()
-        self.repo.audit(actor, task, "create", {}, {"title": title})
+        self.repo.audit(
+            actor, task, "create", {}, {"title": title, "estimated_minutes": task.estimated_minutes}
+        )
         # One pending batch per recipient. Existing batch keeps its initial debounce.
         from datetime import timedelta
 
@@ -168,7 +172,7 @@ class TaskService:
         if task.owner_user_id != actor.id or task.status in ("DONE", "CANCELLED"):
             raise DomainError("Редактировать можно только свою активную задачу.")
         self.repo.version(task, version)
-        old = {"title": task.title, "comment": task.comment, "deadline": str(task.deadline)}
+        old = self.edit_snapshot(task)
         for field, value in changes.items():
             if field == "title" and isinstance(value, str):
                 task.title = text_field(value, 200, "Название")
@@ -178,6 +182,8 @@ class TaskService:
                 if value is not None and value.tzinfo is None:
                     raise DomainError("Дата должна содержать часовой пояс.")
                 task.deadline = value
+            elif field == "estimated_minutes":
+                task.estimated_minutes = estimated_minutes(value)
             else:
                 raise DomainError("Недопустимое поле.")
         task.version += 1
@@ -186,7 +192,16 @@ class TaskService:
             task,
             "edit",
             old,
-            {"title": task.title, "comment": task.comment, "deadline": str(task.deadline)},
+            self.edit_snapshot(task),
         )
         await self.repo.session.flush()
         return task
+
+    @staticmethod
+    def edit_snapshot(task: Task) -> dict[str, object]:
+        return {
+            "title": task.title,
+            "comment": task.comment,
+            "deadline": str(task.deadline),
+            "estimated_minutes": task.estimated_minutes,
+        }

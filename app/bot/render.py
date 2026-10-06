@@ -33,10 +33,14 @@ async def render(
                 reply_markup=markup,
                 parse_mode="HTML",
             )
+            await state.update_data(screen_text=text, screen_markup=markup.model_dump(mode="json"))
             return
         except TelegramBadRequest as exc:
             error = str(exc).lower()
             if "message is not modified" in error:
+                await state.update_data(
+                    screen_text=text, screen_markup=markup.model_dump(mode="json")
+                )
                 return
             if not any(
                 fragment in error
@@ -48,7 +52,11 @@ async def render(
             ):
                 raise
     message = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
-    await state.update_data(message_id=message.message_id)
+    await state.update_data(
+        message_id=message.message_id,
+        screen_text=text,
+        screen_markup=markup.model_dump(mode="json"),
+    )
 
 
 async def reset(state: FSMContext, **data: Any) -> None:
@@ -66,3 +74,19 @@ async def require_current(
     if flow is not None and data.get("flow") != flow:
         raise DomainError("Эта кнопка относится к другой форме. Обнови меню.")
     return data
+
+
+async def validation_error(bot: Bot, chat_id: int, state: FSMContext, error: str) -> None:
+    from app.bot.keyboards.common import cancel
+
+    data = await state.get_data()
+    base = data.get("screen_text", "")
+    markup = (
+        InlineKeyboardMarkup.model_validate(data["screen_markup"])
+        if data.get("screen_markup")
+        else cancel()
+    )
+    text = f"⚠️ {safe(error)}" + (f"\n\n{base}" if base else "")
+    await render(bot, chat_id, state, text, markup)
+    # Keep the original prompt, so repeated errors never accumulate in the message.
+    await state.update_data(screen_text=base)

@@ -124,6 +124,7 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
     await driver.press(1001, "➕ Задача")
     await driver.text(1001, "Купить <билеты>")
     await driver.press(1001, "Без дедлайна")
+    await driver.press(1001, "Не указывать")
     await driver.press(1001, "Пропустить")
     assert "&lt;билеты&gt;" in driver.screen(1001).text
     await driver.text(1002, "/start")
@@ -229,6 +230,7 @@ async def test_calendar_comment_edit_and_custom_rating_reopen(factory, settings:
     await driver.text(1001, "Проверить календарь")
     await driver.press(1001, "Выбрать дату")
     await driver.press(1001, "Без дедлайна")
+    await driver.press(1001, "Не указывать")
     await driver.press(1001, "Добавить комментарий")
     await driver.text(1001, "<Комментарий>")
     await driver.text(1002, "/start")
@@ -269,6 +271,7 @@ async def test_uvicorn_process_restart_preserves_database(factory, settings: Set
     await driver.press(1001, "➕ Задача")
     await driver.text(1001, "Persistent task")
     await driver.press(1001, "Без дедлайна")
+    await driver.press(1001, "Не указывать")
     await driver.press(1001, "Пропустить")
     async with factory.begin() as session:
         await session.execute(update(Notification).values(status="skipped"))

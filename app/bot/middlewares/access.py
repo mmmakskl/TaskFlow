@@ -69,8 +69,7 @@ class AccessMiddleware(BaseMiddleware):
             if isinstance(event, CallbackQuery):
                 await answer_callback(event, str(exc), show_alert=True)
             elif isinstance(event, Message):
-                from app.bot.keyboards.common import cancel
-                from app.bot.render import render
+                from app.bot.render import validation_error
 
-                await render(data["bot"], chat.id, state, str(exc), cancel())
+                await validation_error(data["bot"], chat.id, state, str(exc))
             return None

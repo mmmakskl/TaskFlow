@@ -50,3 +50,11 @@ def text_field(value: str, maximum: int, label: str) -> str:
     if not 1 <= len(value) <= maximum:
         raise DomainError(f"{label}: от 1 до {maximum} символов.")
     return value
+
+
+def estimated_minutes(value: object) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 1 <= value <= 10080:
+        raise DomainError("Введи длительность в минутах: целое число от 1 до 10 080.")
+    return value

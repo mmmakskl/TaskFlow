@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 class TaskForm(StatesGroup):
     title = State()
     deadline = State()
+    estimate = State()
     comment_choice = State()
     comment = State()
     edit = State()

@@ -59,5 +59,10 @@ def inline_calendar(year: int, month: int, flow: int = 0) -> InlineKeyboardMarku
             ]
         )
     rows.append([button("Без дедлайна", "deadline", version=flow, value="none")])
-    rows.append([button("❌ Отмена", "menu")])
+    rows.append(
+        [
+            button("⬅️ Назад", "task_back", version=flow, value="deadline"),
+            button("❌ Отмена", "menu"),
+        ]
+    )
     return keyboard(*rows)

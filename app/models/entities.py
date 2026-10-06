@@ -65,6 +65,7 @@ class Task(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     comment: Mapped[str | None] = mapped_column(String(1500))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    estimated_minutes: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20), default=TaskStatus.BACKLOG)
     rated_points: Mapped[int | None] = mapped_column(Integer)
     rated_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
@@ -81,6 +82,10 @@ class Task(TimestampMixin, Base):
         CheckConstraint("rated_points IS NULL OR rated_points BETWEEN 1 AND 10000"),
         CheckConstraint("awarded_points IS NULL OR awarded_points BETWEEN 1 AND 10000"),
         CheckConstraint("length(title) BETWEEN 1 AND 200"),
+        CheckConstraint(
+            "estimated_minutes IS NULL OR estimated_minutes BETWEEN 1 AND 10080",
+            name="ck_tasks_estimated_minutes",
+        ),
         CheckConstraint("status IN ('BACKLOG','TODO','IN_PROGRESS','DONE','CANCELLED')"),
         CheckConstraint("rated_by_user_id IS NULL OR rated_by_user_id = evaluator_user_id"),
         CheckConstraint(

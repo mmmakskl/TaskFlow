@@ -4,7 +4,8 @@ Private Telegram productivity app for two people: create tasks, rate each other'
 
 ## Features
 
-- Peer rating, optional calendar deadlines and comments, five-item task lists.
+- Peer rating, optional calendar deadlines, effort estimates and comments, five-item task lists.
+- Back navigation that preserves drafts; minute, timezone and target presets.
 - Backlog, todo, in progress, done and cancelled tasks; confirmed reopening.
 - Editable penalty types with immutable calculation snapshots.
 - Weekly results and history, personal targets and display timezones.
@@ -15,7 +16,7 @@ Example menu: `🎯 НЕДЕЛЯ • Макс 7350 / 10000 • Вика 6900 / 1
 
 ## Architecture
 
-`Telegram → FastAPI webhook → PostgreSQL inbox → aiogram handlers → services → repositories → PostgreSQL`. A worker processes updates transactionally and sends outbox notifications. There is no separate REST business API, JWT or Redis. See [architecture](docs/ARCHITECTURE.md), [data model](docs/DATA_MODEL.md), [product flows](docs/PRODUCT.md) and [open-source attribution](docs/OPEN_SOURCE.md).
+`Telegram → FastAPI webhook → PostgreSQL inbox → aiogram handlers → services → repositories → PostgreSQL`. A worker processes updates transactionally and sends outbox notifications. There is no separate REST business API, JWT or Redis. See [architecture](docs/ARCHITECTURE.md), [data model](docs/DATA_MODEL.md), [product flows](docs/PRODUCT.md) and [open-source attribution](docs/OPEN_SOURCE.md). Mobile form behavior is documented in [UX](docs/UX.md).
 
 ## Local setup
 

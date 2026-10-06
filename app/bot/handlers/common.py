@@ -5,20 +5,28 @@ from uuid import uuid4
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
-from app.bot.keyboards.common import button, keyboard
-from app.bot.render import render, reset, safe
+from app.bot.render import render, reset
 from app.models import User
 from app.services.rules import DomainError
-from app.services.ui import UIService, points
+from app.services.ui import UIService
 
 
 async def form(state: FSMContext, **data: Any) -> int:
     flow = randbelow(2**31 - 1) + 1
     await reset(state, flow=flow, key=uuid4().hex, **data)
+    return flow
+
+
+async def step(state: FSMContext, target: State) -> int:
+    """Invalidate callbacks from the previous rendering while retaining the draft."""
+    flow = randbelow(2**31 - 1) + 1
+    await state.set_state(target)
+    await state.update_data(flow=flow)
     return flow
 
 
@@ -75,15 +83,7 @@ async def navigation(
         elif action.name == "history":
             screen = await ui.history(action.entity)
         else:
-            screen = (
-                f"⚙️ <b>Настройки</b>\n\n👤 {safe(actor.display_name)}\nНедельная цель: {points(actor.weekly_target)}\nЧасовой пояс дат: {safe(actor.timezone)}",
-                keyboard(
-                    [button("⚠️ Типы штрафов", "types")],
-                    [button("🎯 Недельная цель", "user_setting", value="weekly_target")],
-                    [button("🌍 Часовой пояс дат", "user_setting", value="timezone")],
-                    [button("🏠 Меню", "menu")],
-                ),
-            )
+            screen = await ui.settings_screen(actor)
     await answer_callback(
         query,
     )

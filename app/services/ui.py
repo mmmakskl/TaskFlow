@@ -8,6 +8,7 @@ from app.models import PenaltyType, Task, User
 from app.services.penalties import PenaltyService
 from app.services.results import ResultService
 from app.services.tasks import TaskService
+from app.utils.duration import duration
 
 STATUS_LABELS = {
     "BACKLOG": "🆕 Ждёт оценки",
@@ -51,6 +52,19 @@ class UIService:
             [button("⚙️ Настройки", "settings")],
         )
 
+    async def settings_screen(self, actor: User) -> tuple[str, InlineKeyboardMarkup]:
+        return (
+            f"⚙️ <b>Настройки</b>\n\n👤 {safe(actor.display_name)}\n"
+            f"Недельная цель: {points(actor.weekly_target)}\nЧасовой пояс дат: {safe(actor.timezone)}\n\n"
+            f"Общая неделя результатов: {safe(self.results.settings.default_timezone)}",
+            keyboard(
+                [button("⚠️ Типы штрафов", "types")],
+                [button("🎯 Недельная цель", "user_setting", value="weekly_target")],
+                [button("🌍 Часовой пояс дат", "user_setting", value="timezone")],
+                [button("🏠 Меню", "menu")],
+            ),
+        )
+
     async def task_list(
         self, actor: User, filter_name: str, page: int
     ) -> tuple[str, InlineKeyboardMarkup]:
@@ -64,6 +78,8 @@ class UIService:
                 "ждёт оценки" if task.rated_points is None else f"⭐ {points(task.rated_points)}"
             )
             text += f"\n{icon} {safe(task.title[:70])}\n   {extra}"
+            if task.estimated_minutes is not None:
+                text += f" • ⏱ ~{duration(task.estimated_minutes)}"
             if task.deadline:
                 text += f" • до {deadline(task, actor)}"
             text += "\n"
@@ -92,6 +108,11 @@ class UIService:
             f"\n⭐ {points(task.rated_points)} баллов" if task.rated_points else "\n⭐ Ждёт оценки"
         )
         text += f"\n📅 {deadline(task, actor)}\n🕒 Создана {task.created_at.astimezone(ZoneInfo(actor.timezone)):%d.%m, %H:%M}"
+        text += (
+            f"\n⏱ План: ~{duration(task.estimated_minutes)}"
+            if task.estimated_minutes
+            else "\n⏱ План: не указан"
+        )
         if task.comment:
             text += f"\n\nКомментарий:\n{safe(task.comment)}"
         rows = []
@@ -137,6 +158,8 @@ class UIService:
             )
         users = {user.id: user for user in await self.tasks.repo.users()}
         text = f"⭐ <b>Задачи на оценку • осталось {count}</b>\n\n{safe(users[task.owner_user_id].display_name)} добавил(а):\n\n📝 {safe(task.title)}\n📅 {deadline(task, actor)}\n💬 {safe(task.comment or '—')}\n\nСколько баллов стоит задача?"
+        if task.estimated_minutes:
+            text = text.replace("\n💬", f"\n⏱ План: ~{duration(task.estimated_minutes)}\n💬")
         rows = [
             [
                 button(str(value), "rate", task.id, task.version, str(value))
@@ -217,9 +240,12 @@ class UIService:
         )
         if settings:
             rows.append([button("➕ Новый тип", "type_new")])
-        rows.append(
-            [button("⬅️ Настройки" if settings else "❌ Отмена", "settings" if settings else "menu")]
-        )
+        if settings:
+            rows.append([button("⬅️ Настройки", "settings")])
+        else:
+            rows.append(
+                [button("⬅️ Назад", "penalty_back", version=flow), button("❌ Отмена", "menu")]
+            )
         return text, keyboard(*rows)
 
     async def type_details(self, type_id: int) -> tuple[str, InlineKeyboardMarkup]:

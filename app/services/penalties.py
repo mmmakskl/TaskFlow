@@ -163,8 +163,12 @@ class PenaltyService:
             raise DomainError("Недопустимые настройки.")
         for field, value in changes.items():
             if field in ("name", "emoji", "description"):
-                value = text_field(
-                    str(value), {"name": 80, "emoji": 16, "description": 500}[field], field
+                value = (
+                    ""
+                    if field == "description" and value == ""
+                    else text_field(
+                        str(value), {"name": 80, "emoji": 16, "description": 500}[field], field
+                    )
                 )
             elif field == "rate":
                 if type(value) is not int or not 0 <= value <= 1000000:

@@ -5,7 +5,7 @@ All application tables are in the private `taskflow` PostgreSQL schema. Schema c
 | Table | Responsibilities |
 | --- | --- |
 | users | Unique Telegram identity, role, name, timezone, target, rating cooldown |
-| tasks | Owner/evaluator, text, deadline, status, rating, awarded snapshot, lifecycle timestamps, version and operation key |
+| tasks | Owner/evaluator, text, deadline, optional estimated_minutes, status, rating, awarded snapshot, lifecycle timestamps, version and operation key |
 | penalty_types | Live name/emoji/description, PER_MINUTE/FIXED/MANUAL calculation, rate, active flag, sort order, version and unique seed key |
 | penalties | Target/creator/type FKs, full type snapshots, quantity, points, comment, version, operation key and soft deletion |
 | audit_events | Actor, entity/action, old/new JSONB and timestamp; immutable |
@@ -27,3 +27,7 @@ Indexes support owner/status pagination, pending evaluator tasks, completion dat
 5. Deploy additive/backward-compatible changes first; introduce breaking changes in stages.
 
 The initial downgrade deliberately refuses to drop all production data. Immutable event triggers must never be disabled during normal operations. Reversals are inserts, not edits. Supabase UI must not create or alter application tables.
+
+## Task estimates (revision 0002)
+
+`estimated_minutes` is nullable or an integer 1–10080. It represents planned effort and never changes scoring. Existing tasks remain null after the additive migration. Active-task owner edits use row locks/version checks and include the estimate in audit snapshots. Application rollback can safely ignore the retained column; its destructive downgrade is refused.

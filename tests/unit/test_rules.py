@@ -82,3 +82,27 @@ def test_dst_week_is_calendar_week(at: datetime, hours: int) -> None:
 def test_naive_datetime_rejected() -> None:
     with pytest.raises(ValueError):
         week_bounds(datetime(2026, 10, 1), "Europe/Helsinki")
+
+
+@pytest.mark.parametrize("value", [None, 1, 90, 10080])
+def test_estimate_range(value):
+    from app.services.rules import estimated_minutes
+
+    assert estimated_minutes(value) == value
+
+
+@pytest.mark.parametrize("value", [0, -1, 10081, True, 1.5, "30"])
+def test_estimate_invalid(value):
+    from app.services.rules import estimated_minutes
+
+    with pytest.raises(DomainError):
+        estimated_minutes(value)
+
+
+@pytest.mark.parametrize(
+    "value,label", [(5, "5 мин"), (60, "1 ч"), (95, "1 ч 35 мин"), (120, "2 ч")]
+)
+def test_duration_label(value, label):
+    from app.utils.duration import duration
+
+    assert duration(value) == label
