@@ -19,3 +19,17 @@ There is no arbitrary percentage gate; required business flows and regression ca
 ## Required production evidence
 
 Health/readiness, valid registered webhook, real /start and task creation, peer rating, completion score, penalty snapshot/config change and confirmed reopening. Redeploy and verify persistent records. Record exact commands, counts and external outcomes in READINESS.md; skipped integration tests must never be reported as passed.
+
+## Foundation gate
+
+`make test-business-unit` runs isolated business services/rules with in-memory repository substitutes,
+without Telegram or PostgreSQL. `TEST_DATABASE_URL=... make test-business` then runs real PostgreSQL
+service/repository/migration checks; it fails when the database variable is missing. No mocked lock
+behavior is treated as concurrency evidence. See [BUSINESS.md](BUSINESS.md) for transaction ownership.
+
+The gate includes the full state/confirmation matrix, identity binding, rating bounds, award snapshots,
+original-week reversals, all penalty methods, stale/tampered previews, configuration rollback, injected
+mid-operation failures, shared-zone/DST boundaries and negative scores. PostgreSQL tests also assert
+concurrent mutation winners, immutable snapshots/events, query indexes, bounded pagination, metadata
+drift, clean migration startup and concurrent migrators. Revision 0003 downgrade/upgrade compares all
+persisted business rows; destructive downgrades and invalid legacy upgrades must fail atomically.

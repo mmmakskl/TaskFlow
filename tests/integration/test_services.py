@@ -80,7 +80,7 @@ async def test_flows_c_d_penalty_snapshot_and_rate_change(factory, settings: Set
     async with factory.begin() as session:
         repo = Repository(session)
         max_user, vika = await repo.users()
-        service = PenaltyService(repo)
+        service = PenaltyService(repo, settings)
         instagram = await session.scalar(
             select(PenaltyType).where(PenaltyType.seed_key == "instagram")
         )
@@ -155,7 +155,7 @@ async def test_concurrent_duplicate_penalty_only_one_record(factory, settings: S
             kind = await session.scalar(
                 select(PenaltyType).where(PenaltyType.seed_key == "instagram")
             )
-            service = PenaltyService(repo)
+            service = PenaltyService(repo, settings)
             penalty = await service.create(
                 actor, owner.id, await service.preview(kind.id, 5, None), "same-operation", True
             )

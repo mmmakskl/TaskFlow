@@ -31,3 +31,12 @@ Render can redeploy the last known-good commit. Roll back application code only 
 ## Security changes
 
 Changing authorized IDs changes who can see both users' records. Review it deliberately. Rotate exposed credentials through their providers and then update Render secrets. A database owner account is required for initial migrations; a separate least-privilege runtime role is a sensible operational hardening step when distinct migration/runtime URLs are introduced.
+
+## Business migration rollback
+
+Revision 0003 can return to 0002 without removing rows or estimate columns, but this removes its new
+constraints and snapshot guard. Prefer an application-only rollback with the guards retained. Test
+any explicit downgrade/upgrade on a restored disposable database before maintenance. Revisions
+0002 and 0001 reject destructive downgrade. If 0003 rejects inconsistent existing data, leave the
+failed deployment stopped, inspect the named constraint privately, and prepare a reviewed corrective
+migration; do not disable checks or rewrite immutable score/audit events. See [BUSINESS.md](BUSINESS.md).

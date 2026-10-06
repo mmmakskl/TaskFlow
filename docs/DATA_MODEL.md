@@ -31,3 +31,18 @@ The initial downgrade deliberately refuses to drop all production data. Immutabl
 ## Task estimates (revision 0002)
 
 `estimated_minutes` is nullable or an integer 1–10080. It represents planned effort and never changes scoring. Existing tasks remain null after the additive migration. Active-task owner edits use row locks/version checks and include the estimate in audit snapshots. Application rollback can safely ignore the retained column; its destructive downgrade is refused.
+
+## Business guards (revision 0003)
+
+Rating fields are either all null or all populated. BACKLOG is unrated; TODO/IN_PROGRESS/DONE are
+rated. CANCELLED requires its cancellation timestamp; only DONE retains completion/award fields.
+Versions are positive. Penalty calculation checks enforce minute × rate, fixed rate and manual
+quantity shapes; multiplication uses bigint to avoid overflow. A trigger prevents alteration of
+penalty snapshots, ownership, operation key, comment and creation timestamp while allowing soft
+deletion/version updates.
+
+Partial indexes cover active owner and pending evaluator pagination and non-deleted penalties.
+`ix_penalty_types_order` serves ordered settings lists. `ix_score_effective_user` covers date-range
+aggregation/history with user, category and points; the existing user/date index remains for
+user-specific queries. Revision 0003 installs guards transactionally and validates old rows. Its
+downgrade removes only these guards/indexes and preserves all records.

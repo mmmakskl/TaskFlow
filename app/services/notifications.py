@@ -1,10 +1,9 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
-
 from app.config.settings import Settings
-from app.models import Notification, Task, User
+from app.models import Notification, User
 from app.repositories.base import Repository
+from app.repositories.notifications import NotificationRepository
 from app.utils.time import utcnow
 
 
@@ -14,17 +13,16 @@ def cooldown_ready(last: datetime | None, now: datetime, minutes: int) -> bool:
 
 class NotificationService:
     def __init__(self, repo: Repository, settings: Settings) -> None:
-        self.repo, self.settings = repo, settings
+        self.repo = (
+            repo
+            if isinstance(repo, NotificationRepository)
+            else NotificationRepository(repo.session)
+        )
+        self.settings = settings
 
     async def claim(self) -> tuple[Notification, User, int] | None:
         now = utcnow()
-        notification = await self.repo.session.scalar(
-            select(Notification)
-            .where(Notification.status == "pending", Notification.available_at <= now)
-            .order_by(Notification.id)
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        )
+        notification = await self.repo.next_due(now)
         if notification is None:
             return None
         user = await self.repo.get(User, notification.recipient_user_id, lock=True)
@@ -33,16 +31,7 @@ class NotificationService:
             return None
         count = 0
         if notification.kind == "rating_pending":
-            count = int(
-                await self.repo.session.scalar(
-                    select(func.count(Task.id)).where(
-                        Task.evaluator_user_id == user.id,
-                        Task.status == "BACKLOG",
-                        Task.deleted_at.is_(None),
-                    )
-                )
-                or 0
-            )
+            count = await self.repo.pending_count(user.id)
             if count == 0 or not cooldown_ready(
                 user.last_rating_notification_at,
                 now,
@@ -54,5 +43,5 @@ class NotificationService:
         # Commit before contacting Telegram. An ambiguous network failure is NOT retried:
         # Telegram sendMessage has no idempotency key; this trades possible omission for no spam.
         notification.status = "sending"
-        await self.repo.session.flush()
+        await self.repo.flush()
         return notification, user, count

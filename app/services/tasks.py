@@ -1,23 +1,32 @@
 import logging
 from datetime import datetime
-from uuid import uuid4
-
-from sqlalchemy.dialects.postgresql import insert
 
 from app.config.settings import Settings
 from app.models import Notification, ScoreEvent, Task, User
 from app.repositories.tasks import TaskRepository
-from app.services.rules import DomainError, estimated_minutes, rating_points, text_field, transition
+from app.services.base import AuthorizedService
+from app.services.rules import (
+    DomainError,
+    estimated_minutes,
+    operation_key,
+    rating_points,
+    text_field,
+    transition,
+)
+from app.services.transactions import atomic
 from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
 
-class TaskService:
-    def __init__(self, repo: TaskRepository, settings: Settings) -> None:
-        self.repo = repo
-        self.settings = settings
+class TaskService(AuthorizedService):
+    repo: TaskRepository
 
+    def __init__(self, repo: TaskRepository, settings: Settings) -> None:
+        super().__init__(repo, settings)
+        self.repo = repo
+
+    @atomic
     async def create(
         self,
         actor: User,
@@ -27,6 +36,8 @@ class TaskService:
         deadline: datetime | None = None,
         estimate: int | None = None,
     ) -> Task:
+        actor = await self.actor(actor)
+        key = operation_key(key)
         await self.repo.operation_lock(key)
         existing = await self.repo.by_operation(key)
         if existing:
@@ -36,60 +47,42 @@ class TaskService:
         title = text_field(title, 200, "Название")
         if comment is not None:
             comment = text_field(comment, 1500, "Комментарий")
-        if deadline and deadline.tzinfo is None:
+        if deadline is not None and (not isinstance(deadline, datetime) or deadline.tzinfo is None):
             raise DomainError("Дедлайн должен включать часовой пояс.")
-        peers = [u for u in await self.repo.users() if u.id != actor.id]
-        if len(peers) != 1:
-            raise DomainError("Не удалось определить второго пользователя.")
+        peer = await self.user_repo.peer(actor)
         task = Task(
             owner_user_id=actor.id,
-            evaluator_user_id=peers[0].id,
+            evaluator_user_id=peer.id,
             title=title,
             comment=comment,
             deadline=deadline,
             estimated_minutes=estimated_minutes(estimate),
             operation_key=key,
         )
-        self.repo.session.add(task)
-        await self.repo.session.flush()
+        self.repo.add(task)
+        await self.repo.flush()
         self.repo.audit(
             actor, task, "create", {}, {"title": title, "estimated_minutes": task.estimated_minutes}
         )
-        # One pending batch per recipient. Existing batch keeps its initial debounce.
-        from datetime import timedelta
-
-        statement = (
-            insert(Notification)
-            .values(
-                recipient_user_id=task.evaluator_user_id,
-                kind="rating_pending",
-                payload={},
-                dedupe_key=f"rating:{uuid4()}",
-                status="pending",
-                available_at=utcnow()
-                + timedelta(seconds=self.settings.rating_notification_debounce_seconds),
-                created_at=utcnow(),
-            )
-            .on_conflict_do_nothing(
-                index_elements=[Notification.recipient_user_id],
-                index_where=(Notification.kind == "rating_pending")
-                & (Notification.status == "pending"),
-            )
+        await self.repo.enqueue_rating(
+            task.evaluator_user_id, self.settings.rating_notification_debounce_seconds
         )
-        await self.repo.session.execute(statement)
         logger.info("task_created entity_id=%s actor_id=%s", task.id, actor.id)
         return task
 
     async def view(self, actor: User, task_id: int) -> Task:
+        actor = await self.actor(actor)
         task = await self.repo.get(Task, task_id)
         if actor.id not in (task.owner_user_id, task.evaluator_user_id) or task.deleted_at:
             raise DomainError("Эта задача недоступна.")
         return task
 
+    @atomic
     async def rate(self, actor: User, task_id: int, points: int, version: int) -> Task:
+        actor = await self.actor(actor)
         points = rating_points(points)
         task = await self.repo.get(Task, task_id, lock=True)
-        if task.evaluator_user_id != actor.id or task.owner_user_id == actor.id:
+        if task.deleted_at or task.evaluator_user_id != actor.id or task.owner_user_id == actor.id:
             raise DomainError("Свою задачу оценивать нельзя.")
         self.repo.version(task, version)
         if task.status != "BACKLOG" or task.rated_points is not None:
@@ -98,7 +91,7 @@ class TaskService:
         task.status = "TODO"
         task.version += 1
         self.repo.audit(actor, task, "rate", {"rated_points": None}, {"rated_points": points})
-        self.repo.session.add(
+        self.repo.add(
             Notification(
                 recipient_user_id=task.owner_user_id,
                 kind="rated",
@@ -112,14 +105,16 @@ class TaskService:
                 available_at=utcnow(),
             )
         )
-        await self.repo.session.flush()
+        await self.repo.flush()
         return task
 
+    @atomic
     async def change_status(
         self, actor: User, task_id: int, status: str, version: int, confirmed: bool = False
     ) -> Task:
+        actor = await self.actor(actor)
         task = await self.repo.get(Task, task_id, lock=True)
-        if task.owner_user_id != actor.id:
+        if task.deleted_at or task.owner_user_id != actor.id:
             raise DomainError("Статус меняет только владелец задачи.")
         self.repo.version(task, version)
         transition(task.status, status, confirmed)
@@ -130,7 +125,7 @@ class TaskService:
         }
         if task.status == "DONE":
             assert task.completed_at is not None and task.awarded_points is not None
-            self.repo.session.add(
+            self.repo.add(
                 ScoreEvent(
                     user_id=actor.id,
                     category="task",
@@ -145,7 +140,7 @@ class TaskService:
             if task.rated_points is None:
                 raise DomainError("Сначала второй пользователь должен оценить задачу.")
             task.awarded_points, task.completed_at = task.rated_points, utcnow()
-            self.repo.session.add(
+            self.repo.add(
                 ScoreEvent(
                     user_id=actor.id,
                     category="task",
@@ -163,15 +158,23 @@ class TaskService:
         self.repo.audit(
             actor, task, "status", old, {"status": status, "awarded_points": task.awarded_points}
         )
-        await self.repo.session.flush()
+        await self.repo.flush()
         logger.info("task_status entity_id=%s status=%s", task.id, status)
         return task
 
+    @atomic
     async def edit(self, actor: User, task_id: int, version: int, **changes: object) -> Task:
+        actor = await self.actor(actor)
         task = await self.repo.get(Task, task_id, lock=True)
-        if task.owner_user_id != actor.id or task.status in ("DONE", "CANCELLED"):
+        if (
+            task.deleted_at
+            or task.owner_user_id != actor.id
+            or task.status in ("DONE", "CANCELLED")
+        ):
             raise DomainError("Редактировать можно только свою активную задачу.")
         self.repo.version(task, version)
+        if not changes:
+            raise DomainError("Укажи хотя бы одно изменение.")
         old = self.edit_snapshot(task)
         for field, value in changes.items():
             if field == "title" and isinstance(value, str):
@@ -194,7 +197,7 @@ class TaskService:
             old,
             self.edit_snapshot(task),
         )
-        await self.repo.session.flush()
+        await self.repo.flush()
         return task
 
     @staticmethod

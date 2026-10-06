@@ -30,6 +30,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check app tests alembic && ruff format --check app tests alembic
       - run: mypy app
+      - name: Isolated business gate
+        run: make test-business-unit PYTHON=python
       - run: pytest -q --cov=app --cov-report=term-missing
       - run: pip-audit -r requirements.txt --disable-pip --no-deps
       - run: docker build --target production -t taskflow:ci .

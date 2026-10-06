@@ -53,14 +53,14 @@ class AccessMiddleware(BaseMiddleware):
             actor=await repo.user(sender.id),
             repo=repo,
             task_service=TaskService(TaskRepository(session), self.settings),
-            penalty_service=PenaltyService(repo),
+            penalty_service=PenaltyService(repo, self.settings),
             result_service=ResultService(ResultRepository(session), self.settings),
             settings=self.settings,
         )
         data["ui"] = UIService(
             data["task_service"], data["penalty_service"], data["result_service"]
         )
-        data["settings_service"] = SettingsService(repo)
+        data["settings_service"] = SettingsService(repo, self.settings)
         state: FSMContext = data["state"]
         try:
             async with session.begin_nested():

@@ -66,7 +66,9 @@ make docker
 docker build --target test -t taskflow:test .
 ```
 
-Integration tests are skipped without `TEST_DATABASE_URL`. They destroy only their dedicated `_test` database schema: never point them at production. See [testing](docs/TESTING.md).
+Integration tests are skipped without `TEST_DATABASE_URL`. They destroy only their dedicated `_test` database schema: never point them at production. See [testing](docs/TESTING.md). Run `make test-business-unit` for the isolated business gate, then
+`TEST_DATABASE_URL=... make test-business` for real PostgreSQL checks. Transaction ownership, scoring
+invariants and safe schema rollback are documented in [business layer](docs/BUSINESS.md).
 
 Production Docker runs Alembic before Uvicorn as a non-root user. `docker compose up --build app` starts the app against the persistent local volume; inspect `/health` and `/ready` on port 10000. No application data is stored in that container.
 

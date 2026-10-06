@@ -1,8 +1,13 @@
-from sqlalchemy import func, select
+from datetime import timedelta
+from uuid import uuid4
 
-from app.models import Task, User
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+
+from app.models import Notification, Task, User
 from app.repositories.base import Repository
 from app.services.rules import DomainError
+from app.utils.time import utcnow
 
 FILTERS = {
     "active": ("BACKLOG", "TODO", "IN_PROGRESS"),
@@ -17,7 +22,7 @@ class TaskRepository(Repository):
     async def list(
         self, actor: User, filter_name: str = "active", page: int = 0, pending: bool = False
     ) -> tuple[list[Task], int]:
-        if page < 0 or page > 100000 or filter_name not in FILTERS:
+        if type(page) is not int or not 0 <= page <= 100000 or filter_name not in FILTERS:
             raise DomainError("Недопустимая страница.")
         scope = Task.evaluator_user_id == actor.id if pending else Task.owner_user_id == actor.id
         statuses = ("BACKLOG",) if pending else FILTERS[filter_name]
@@ -30,6 +35,8 @@ class TaskRepository(Repository):
         return list(rows), count
 
     async def pending_next(self, actor: User, after_id: int = 0) -> tuple[Task | None, int]:
+        if type(after_id) is not int or after_id < 0:
+            raise DomainError("Недопустимая позиция списка.")
         conditions = (
             Task.evaluator_user_id == actor.id,
             Task.status == "BACKLOG",
@@ -47,3 +54,24 @@ class TaskRepository(Repository):
 
     async def by_operation(self, key: str) -> Task | None:
         return await self.session.scalar(select(Task).where(Task.operation_key == key))
+
+    async def enqueue_rating(self, evaluator_id: int, debounce_seconds: int) -> None:
+        # The partial unique index permits one pending batch, preserving its first debounce.
+        now = utcnow()
+        await self.session.execute(
+            insert(Notification)
+            .values(
+                recipient_user_id=evaluator_id,
+                kind="rating_pending",
+                payload={},
+                dedupe_key=f"rating:{uuid4()}",
+                status="pending",
+                available_at=now + timedelta(seconds=debounce_seconds),
+                created_at=now,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[Notification.recipient_user_id],
+                index_where=(Notification.kind == "rating_pending")
+                & (Notification.status == "pending"),
+            )
+        )

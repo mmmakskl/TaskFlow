@@ -1,11 +1,16 @@
 PYTHON ?= venv/bin/python
 
-.PHONY: dev test lint format typecheck check migrate migration docker run start
+.PHONY: dev test test-business-unit test-business lint format typecheck check migrate migration docker run start
 dev:
 	python3 -m venv venv
 	venv/bin/pip install -r requirements-dev.txt
 test:
 	$(PYTHON) -m pytest -q
+test-business-unit:
+	$(PYTHON) -m pytest -q tests/unit/test_business_*.py
+test-business: test-business-unit
+	@test -n "$$TEST_DATABASE_URL" || (echo 'TEST_DATABASE_URL is required (disposable _test database)'; exit 1)
+	$(PYTHON) -m pytest -q tests/integration/test_business_*.py tests/integration/test_services.py
 lint:
 	$(PYTHON) -m ruff check app tests alembic
 	$(PYTHON) -m ruff format --check app tests alembic

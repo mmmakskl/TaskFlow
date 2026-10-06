@@ -14,6 +14,8 @@ class Repository:
         self.session = session
 
     async def get(self, model: type[Entity], entity_id: int, lock: bool = False) -> Entity:
+        if type(entity_id) is not int or entity_id < 1:
+            raise StaleAction()
         query = select(model).where(model.id == entity_id)  # type: ignore[attr-defined]
         if lock:
             query = query.with_for_update().execution_options(populate_existing=True)
@@ -50,7 +52,13 @@ class Repository:
             )
         )
 
+    def add(self, entity: Base) -> None:
+        self.session.add(entity)
+
+    async def flush(self) -> None:
+        await self.session.flush()
+
     @staticmethod
     def version(entity: Any, expected: int) -> None:
-        if entity.version != expected:
+        if type(expected) is not int or expected < 1 or entity.version != expected:
             raise StaleAction()
