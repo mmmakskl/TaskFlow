@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: taskflow
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /ready
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: WEBHOOK_BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: USER_MAX_ID
+        sync: false
+      - key: USER_VIKA_ID
+        sync: false
+      - key: USER_MAX_NAME
+        value: Макс
+      - key: USER_VIKA_NAME
+        value: Вика
+      - key: DEFAULT_TIMEZONE
+        value: Europe/Helsinki
+      - key: DEFAULT_WEEKLY_TARGET
+        value: "10000"
+      - key: RATING_NOTIFICATION_COOLDOWN_MINUTES
+        value: "60"
+      - key: RATING_NOTIFICATION_DEBOUNCE_SECONDS
+        value: "5"
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
