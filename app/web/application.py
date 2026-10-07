@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.dispatcher import create_dispatcher
+from app.bot.navigation import register_commands
 from app.config.logging import configure_logging
 from app.config.settings import Settings
 from app.db.seed import seed
@@ -50,6 +51,7 @@ def create_app(
                 await seed(session, settings)
             if settings.register_webhook:
                 await configure_webhook(telegram, settings)
+            await register_commands(telegram, list(settings.authorized_ids))
             task = (
                 asyncio.create_task(run_workers(factory, dp, telegram, settings, stop))
                 if workers

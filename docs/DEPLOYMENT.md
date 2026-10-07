@@ -5,7 +5,8 @@
 This is the deployment runbook, not a claim that the audited release is live. Check
 [QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md) for dated evidence and remaining gates.
 The first incompatible consumer upgrade has completed. Use the maintenance procedure below
-when upgrading another legacy installation; normal releases use checks-pass auto-deploy.
+when upgrading another legacy installation; compatible releases use checks-pass auto-deploy. Collaborative revision 0005 requires the same
+stop-old-worker maintenance sequence, because old code cannot safely handle shared tasks/new events.
 
 You need GitHub repository/admin access, Render and Supabase accounts, a BotFather token and the two
 Telegram numeric IDs. For a new product, create a separate bot; never point an existing production
@@ -153,15 +154,15 @@ Use the supplied probe with a securely exported Render ENV file (mode 0600, outs
 
 ```sh
 venv/bin/python -m tools.deployment_probe --env-file /secure/path/production.env \
-  --exercise-webhook --receipt /secure/path/first-deploy.json
+  --revision 0005 --exercise-webhook --receipt /secure/path/first-deploy.json
 # Render Manual Deploy → Deploy latest commit, then wait for Live again.
 venv/bin/python -m tools.deployment_probe --env-file /secure/path/production.env \
-  --exercise-webhook --baseline /secure/path/first-deploy.json \
+  --revision 0005 --exercise-webhook --baseline /secure/path/first-deploy.json \
   --receipt /secure/path/after-redeploy.json
 ```
 
 The probe checks HTTPS endpoints, unsigned rejection, signed duplicate inbox processing, revision
-0004, Telegram getWebhookInfo and business-data fingerprints. Its signed test is an empty synthetic
+0005, Telegram getWebhookInfo and business-data fingerprints. Its signed test is an empty synthetic
 update with a reserved negative ID: it does not impersonate a user or send a chat message. A previous
 receipt's marker must still exist after redeploy. Receipts contain counts/hashes, never task text or
 secrets. Avoid changing business records between receipts when comparing their exact fingerprints.
@@ -193,3 +194,12 @@ webhook delivery timestamps, actual two-account acceptance and before/after rede
 Do not record credentials or private task text. [QA_REPORT.md](QA_REPORT.md) is the audit decision;
 [READINESS.md](READINESS.md) is the chronological release evidence. Old discovery plans under
 `docs/superpowers/plans/` are historical planning notes, not the source of current deployment status.
+
+## Collaborative 0005 release verification
+
+Back up before maintenance; validate restoration and0004 → 0005 migration in a disposable database.
+Disable auto-deploy, stop the0004 service, then deploy the CI-tested commit and verify0005 before
+allowing new tasks. Do not overlap0004 and 0005 workers or roll back to0004 code after collaborative
+data is written. Schema 0005 refuses destructive downgrade. Historical task fingerprint comparison
+must project the original columns, because 0005 adds identity/provenance columns without changing
+legacy task content. Full current-schema fingerprints are appropriate for subsequent redeploys.

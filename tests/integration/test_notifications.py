@@ -6,7 +6,7 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError, TelegramRetryAfter
 from aiogram.methods import SendMessage
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from app.db.session import database
 from app.models import AuditEvent, Notification, Penalty, PenaltyType, ScoreEvent, User
@@ -344,11 +344,25 @@ async def test_unauthorized_recipient_and_unknown_kind_never_leak(factory, setti
 async def test_notification_migration_roundtrip_preserves_cooldown_and_old_attempt(
     factory, settings
 ):
-    await create_task(factory, settings, "migration")
-    await due(factory)
+    # Exercise the historical 0004 migration against its own schema. Revision
+    # 0005 deliberately refuses downgrade to avoid discarding collaborative data.
     async with factory.begin() as session:
-        row, user, _ = await NotificationService(NotificationRepository(session), settings).claim()
-        last, row_id = user.last_rating_notification_at, row.id
+        await session.execute(text("DROP SCHEMA taskflow CASCADE"))
+        await session.execute(text("DROP TABLE public.alembic_version"))
+    assert (await alembic(settings, "upgrade", "0004"))[0] == 0
+    async with factory.begin() as session:
+        await session.execute(
+            text(
+                "INSERT INTO taskflow.users (id,telegram_id,display_name,role,timezone,weekly_target,last_rating_notification_at,created_at,updated_at) VALUES (1,1001,'Max','max','UTC',10000,now(),now(),now()),(2,1002,'Vika','vika','UTC',10000,NULL,now(),now())"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO taskflow.notifications (recipient_user_id,kind,payload,dedupe_key,status,available_at,created_at,attempts) VALUES (1,'rating_pending','{}','legacy-attempt','sending',now(),now(),1)"
+            )
+        )
+        last = await session.scalar(select(User.last_rating_notification_at).where(User.id == 1))
+        row_id = await session.scalar(select(Notification.id))
     assert (await alembic(settings, "downgrade", "0003"))[0] == 0
     code, output = await alembic(settings, "upgrade", "head")
     assert code == 0, output

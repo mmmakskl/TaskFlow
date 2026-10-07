@@ -1,14 +1,19 @@
 # TaskFlow
 
-Private Telegram productivity app for Max and Vika: create a task, have the other person rate it,
-complete it, and track weekly points minus penalties. The Russian interface uses inline buttons,
-compact screens, a calendar and five-item lists. Task estimates, deadlines and comments are optional.
+Private Telegram productivity app for Max and Vika: assign personal or shared tasks, agree on
+points, use fixed-price templates and track weekly results minus penalties. Both participants can
+view each other’s tasks and totals. The Russian interface uses compact screens, persistent quick
+actions, inline controls, a calendar and five-item lists. Task estimates, deadlines and comments are optional.
 Forms and all business data persist in PostgreSQL.
 
 **Release status:** the audited application is deployed on Render with schema 0004. Health,
 readiness, signed webhook processing and migration persistence pass. Real two-account Telegram
 acceptance remains deferred. See [fresh review](docs/PRODUCTION_REVIEW.md),
 [QA report](docs/QA_REPORT.md) and [release evidence](docs/READINESS.md).
+
+The collaborative-task update in this workspace uses schema **0005**. Its functionality and
+acceptance criteria are documented in [PRODUCT.md](docs/PRODUCT.md). Production deployment is a
+separate operation; the release evidence above describes the previously deployed revision.
 
 ## Architecture and repository map
 
@@ -51,7 +56,7 @@ The example token is a placeholder, not a usable bot token.
 ```sh
 docker compose up -d db
 docker compose exec -T db pg_isready -U taskflow -d taskflow
-make migrate                     # Empty database → current Alembic head (0004)
+make migrate                     # Empty database → current Alembic head (0005)
 venv/bin/python -m alembic current
 make run                         # Terminal 1: HTTP server at http://localhost:8000
 ```

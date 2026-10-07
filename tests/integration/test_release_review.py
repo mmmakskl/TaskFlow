@@ -5,6 +5,7 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import SendMessage, SetWebhook
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.bot.dispatcher import create_dispatcher
@@ -87,7 +88,16 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             assert registrations[0].url == "https://release.example.test/telegram/webhook"
             assert registrations[0].secret_token == production.webhook_secret.get_secret_value()
             menus = [call for call in api.calls if isinstance(call, SendMessage)]
-            assert len(menus) == 1 and "НЕДЕЛЯ" in menus[0].text
+            carriers = [
+                call for call in menus if isinstance(call.reply_markup, ReplyKeyboardMarkup)
+            ]
+            dashboards = [
+                call for call in menus if isinstance(call.reply_markup, InlineKeyboardMarkup)
+            ]
+            assert len(menus) == 2
+            assert len(carriers) == 1 and len(dashboards) == 1
+            assert "НЕДЕЛЯ" in dashboards[0].text
+            assert all(call.chat_id == 1001 for call in menus)
 
 
 async def test_concurrent_completion_and_reopen_cycles_match_database_ledger(factory, settings):

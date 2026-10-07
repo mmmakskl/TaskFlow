@@ -5,7 +5,7 @@ from typing import Any
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage, TelegramMethod
-from aiogram.types import Chat, Message
+from aiogram.types import Chat, InlineKeyboardMarkup, Message
 
 
 class TelegramSession(BaseSession):
@@ -31,7 +31,11 @@ class TelegramSession(BaseSession):
                 date=datetime.now(UTC),
                 chat=Chat(id=int(method.chat_id), type="private"),
                 text=method.text,
-                reply_markup=method.reply_markup,
+                reply_markup=(
+                    method.reply_markup
+                    if isinstance(method.reply_markup, InlineKeyboardMarkup)
+                    else None
+                ),
             )
         return True
 

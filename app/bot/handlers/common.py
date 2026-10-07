@@ -64,7 +64,7 @@ async def navigation(
         data = await state.get_data()
         await reset(state)
         screen = await ui.task_details(
-            actor, action.entity, data.get("filter", "active"), data.get("page", 0)
+            actor, action.entity, data.get("filter", "mine_all"), data.get("page", 0)
         )
     else:
         await reset(state)
@@ -72,7 +72,7 @@ async def navigation(
             await reset(state, keep_navigation=False)
             screen = await ui.menu(actor)
         elif action.name == "list":
-            filter_name = action.value or "active"
+            filter_name = action.value or "mine_all"
             await state.update_data(filter=filter_name, page=action.entity)
             screen = await ui.task_list(actor, filter_name, action.entity)
         elif action.name == "ratings":
@@ -97,7 +97,7 @@ async def navigation(
 async def show_task(ui: UIService, actor: User, task_id: int, bot: Bot, state: FSMContext) -> None:
     data = await state.get_data()
     await show(
-        await ui.task_details(actor, task_id, data.get("filter", "active"), data.get("page", 0)),
+        await ui.task_details(actor, task_id, data.get("filter", "mine_all"), data.get("page", 0)),
         bot,
         actor.telegram_id,
         state,

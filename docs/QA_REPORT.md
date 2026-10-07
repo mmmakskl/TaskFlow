@@ -1,5 +1,45 @@
 # Independent QA / SRE release audit
 
+## Collaborative extension — 2026-10-07
+
+This workspace adds collaborative tasks, shared awards, suggested/rerated prices, templates and
+persistent guarded Telegram navigation under Alembic `0005`. Deployment verification is tracked separately in [READINESS.md](READINESS.md).
+The deployed `0004` release evidence below is historical and does not validate the new extension.
+
+Scope and acceptance sequence: [PRODUCT.md](PRODUCT.md), [UX_ACCEPTANCE.md](UX_ACCEPTANCE.md),
+[approved implementation plan](superpowers/plans/2026-10-07-collaborative-tasks.md).
+Domain, UI and navigation received separate reviews, including scoped checks of the fixes.
+Final whole-change review identified and corrected three groups: test-module collection/carrier
+assertions, NULL rating provenance accepted by SQL CHECK, and divergent task/notification visibility.
+Scoped re-review approved all corrections. Revisions `0001`–`0004` were byte-compared unchanged;
+only the unpublished `0005` revision and matching model metadata were tightened.
+
+Final commands, using only disposable test databases:
+
+```sh
+TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55438/taskflow_collab_test make check
+docker build --target test -t taskflow:collaborative-test .
+```
+
+- Native final `make check`: **669 passed in 236.40s**, zero skips/failures;
+  Ruff lint/format passed for 110 files, mypy passed for 70 source files.
+- Isolated Docker test target, Python 3.12/PostgreSQL 15: **669 passed in 300.49s**,
+  zero skips/failures, **72% coverage**; Ruff, mypy and runtime dependency audit passed
+  (no known vulnerabilities reported).
+- Actual PostgreSQL regressions include shared dual awards/original-week reversals,
+  permission/version/idempotency races, legacy populated migration/history preservation,
+  template snapshots/stale drafts, complete rating provenance, configured-identity/template-creator
+  visibility, notification cooldown eligibility and durable navigation recovery.
+- New negative provenance/visibility regressions reproduced four failures before the fixes;
+  their positive manual/template and edited/disabled-template controls remain green.
+- Ten handoff documents have no missing relative link targets.
+
+The temporary PostgreSQL 16 container and both review/test databases were removed after verification.
+Existing deployment and preview containers were left untouched. Detailed implementation/review
+records are retained under `.implementation/collaborative-tasks/` as local scratch records. Git metadata is available for the subsequent branch/deployment phase;
+the earlier verification did not perform a deployment.
+Automated Telegram transport is mocked; no actual two-phone acceptance is claimed.
+
 ## Fresh final review
 
 See [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md) for the fresh code-first audit, three additional
@@ -179,3 +219,17 @@ one migration-env correction and regression are distinct from the preceding 423-
   Ruff, mypy and runtime dependency audit passed. This includes the new search-path regression. Real BotFather credential entry, real two-user Telegram acceptance, new-release
 Render deployment and actual Render redeploy persistence remain the existing external acceptance gates.
 This documentation pass does not close the release decision above.
+
+## Deadline extension verification — 2026-10-07
+
+Twenty new tests cover exact deadline boundaries, UTC/DST elapsed time, cancelled/on-time/late
+completion semantics, scoped lists, prefilled personal/shared penalties, manual confirmation,
+duplicate/stale actions and service eligibility. Final native `make check`: **689 passed in 283.66s**,
+zero skips, Ruff113 files/mypy71 modules pass. Isolated Docker test target: **689 passed in 385.32s**, zero skips, **72% coverage**;
+Ruff, mypy and runtime dependency audit passed. No known vulnerabilities were reported. Current candidate branch: `feat/collaborative-deadlines`.
+
+A fresh production backup was restored into isolated PostgreSQL 17 and migrated0004 → 0005. Original
+columns of 55 tasks, 2 penalties, 7 penalty types, 81 audit events, 4 score events and 2 users matched their
+pre-upgrade fingerprints. No production business record was created or changed by these checks.
+Local390 px Safari inspection covered the overdue list, completed-late card and full confirmed
+manual-penalty flow using synthetic fixtures.

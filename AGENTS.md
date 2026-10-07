@@ -15,9 +15,13 @@ an outbox loop delivers notifications.
 ## Business Invariants
 
 - Authenticate the ENV-configured Telegram sender in their matching private chat. Exactly two users;
-  sender owns tasks; peer rates.
-- Create BACKLOG; peer rating → TODO; TODO → IN_PROGRESS/DONE; IN_PROGRESS → TODO/DONE.
+  tasks may be self-assigned, peer-assigned or shared; creator and executor are distinct.
+  Other proposal author approves; template self/shared tasks are pre-rated.
+- Manual tasks create BACKLOG; approval → TODO; template self/shared create TODO; TODO → IN_PROGRESS/DONE; IN_PROGRESS → TODO/DONE.
   Cancellation requires confirmation; CANCELLED is terminal. Leaving DONE requires confirmation.
+- Shared completion awards full price to both atomically; reopening reverses both original awards.
+- Only current manual rater may change TODO/IN_PROGRESS price, confirmed; never DONE/CANCELLED.
+- Title/effort changes reset approval; deadline/comment do not. Executor controls accepted personal tasks.
 - Completion stores `awarded_points`; count by `completed_at`, never task creation/rating date.
   Sum immutable score events in shared `DEFAULT_TIMEZONE` Monday-to-Monday bounds.
 - Reopen reverses the original award in its original week; penalty deletion compensates its original

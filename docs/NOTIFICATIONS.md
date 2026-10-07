@@ -2,10 +2,12 @@
 
 ## Producers and transactions
 
-Task creation inserts a `rating_pending` outbox batch in the same transaction as the task.
+Task creation requiring approval inserts a `rating_pending` outbox batch in the same transaction as the task.
 The partial unique index permits one pending batch per recipient. The first event sets a bounded
 debounce (`RATING_NOTIFICATION_DEBOUNCE_SECONDS`, default 5); subsequent events do not extend it.
-Rating inserts one `rated` event per task. Confirmed penalty creation inserts one `penalty_created`
+Each approval or rerating inserts a version-keyed `rated` event. Approval goes to the current
+proposal author; rerating goes to the executor (shared: the other participant) and snapshots the
+old/new prices and actual status. Rejection inserts `task_rejected` for the proposal author. Confirmed penalty creation inserts one `penalty_created`
 event per penalty, including self-assigned penalties. Payloads snapshot names and points. Unique
 operation keys, row versions, transactions and outbox dedupe keys prevent duplicate side effects.
 Status transitions, reopen and configuration edits do not enqueue notifications.
@@ -61,3 +63,11 @@ Run `pytest tests/unit/test_business_notifications.py` and, with a disposable `T
 `pytest tests/integration/test_notifications.py`. PostgreSQL tests cover batching, concurrent
 producers/consumers, FK lock interactions, duplicate actions, cooldown after restart, rollback,
 empty queues, delivery errors, rate limiting, migration roundtrip and independent worker loops.
+
+## Collaborative revision compatibility
+
+Revision 0005 preserves the 0004 delivery model and cooldown. Automatic self/shared template tasks
+need no approval batch; peer-assigned templates do. Semantic task edits enqueue a new approval batch
+without replaying ambiguous sends. A repeated price save is a no-op. Routine shared completion and
+reopen remain silent. After 0005, destructive schema downgrade is refused; the 0004 rollback details
+above describe a database still on that historical revision.

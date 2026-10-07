@@ -28,9 +28,20 @@ async def target_prompt(bot: Bot, actor: User, state: FSMContext, service: Penal
     )
 
 
-async def kind_prompt(bot: Bot, actor: User, state: FSMContext, ui: UIService) -> None:
+async def kind_prompt(
+    bot: Bot, actor: User, state: FSMContext, ui: UIService, page: int = 0
+) -> None:
     flow = await step(state, PenaltyForm.kind)
-    await show(await ui.penalty_types(flow=flow), bot, actor.telegram_id, state)
+    text, markup = await ui.penalty_types(page, flow=flow)
+    data = await state.get_data()
+    if data.get("deadline_comment"):
+        users = {user.id: user for user in await ui.penalties.users()}
+        target = users.get(data.get("target_id", 0))
+        text = (
+            f"👤 Штраф для: {safe(target.display_name if target else 'Участник')}\n"
+            f"{safe(data['deadline_comment'])}\n\n" + text
+        )
+    await show((text, markup), bot, actor.telegram_id, state)
 
 
 async def quantity_prompt(

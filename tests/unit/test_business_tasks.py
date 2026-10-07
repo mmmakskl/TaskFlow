@@ -182,6 +182,8 @@ async def test_owner_only_status_and_edit(business):
         business.max, task.id, task.version, comment=None, deadline=None, estimated_minutes=None
     )
     assert task.comment is None and task.deadline is None and task.estimated_minutes is None
+    assert task.status == "BACKLOG" and task.rated_points is None
+    await business.tasks.rate(business.vika, task.id, 500, task.version)
     await business.tasks.change_status(business.max, task.id, "DONE", task.version)
     with pytest.raises(DomainError):
         await business.tasks.edit(business.max, task.id, task.version, title="Changed")

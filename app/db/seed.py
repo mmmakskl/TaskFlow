@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import Settings
 from app.db.session import database
-from app.models import PenaltyType, User
+from app.models import PenaltyType, TaskTemplate, User
 from app.utils.time import utcnow
 
 DEFAULT_PENALTIES = [
@@ -109,6 +109,23 @@ async def seed(session: AsyncSession, settings: Settings) -> None:
             .on_conflict_do_nothing(index_elements=[PenaltyType.seed_key])
         )
     users = list(await session.scalars(select(User)))
+    for key, title in (("english", "Английский"), ("diploma", "Диплом")):
+        await session.execute(
+            insert(TaskTemplate)
+            .values(
+                creator_user_id=users[0].id,
+                seed_key=key,
+                title=title,
+                estimated_minutes=60,
+                points=500,
+                is_active=True,
+                version=1,
+                operation_key=f"seed:template:{key}",
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            .on_conflict_do_nothing(index_elements=[TaskTemplate.seed_key])
+        )
     if len(users) != 2:
         raise RuntimeError("Expected exactly two configured users")
 

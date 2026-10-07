@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.models import Notification, Task, User
 from app.repositories.base import Repository
+from app.repositories.tasks import TaskRepository
 
 
 class NotificationRepository(Repository):
@@ -83,6 +84,7 @@ class NotificationRepository(Repository):
         return int(
             await self.session.scalar(
                 select(func.count(Task.id)).where(
+                    TaskRepository.visible(),
                     Task.evaluator_user_id == user_id,
                     Task.status == "BACKLOG",
                     Task.deleted_at.is_(None),

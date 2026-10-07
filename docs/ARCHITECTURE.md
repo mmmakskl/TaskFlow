@@ -77,7 +77,7 @@ PostgreSQL clock plus `users.last_rating_notification_at`. Empty queues skip; co
 batch until the next eligible time. Reservation commits before sending, at most one attempt per
 60 minutes per user. The cooldown survives replicas, process restarts and database restarts.
 
-Rating queues an owner notice; penalty creation queues a recipient notice. Other status changes
+Approval queues a proposal-author notice; rerating queues an executor notice; rejection queues a proposal-author notice; penalty creation queues a recipient notice. Other status changes
 produce no routine notices. Explicit Telegram rate-limit rejections may retry; ambiguous network
 failures become `uncertain` and are not replayed. Sending rows abandoned for five minutes also become
 uncertain. This trades possible omission for avoiding duplicate spam, not exactly-once delivery.
@@ -112,8 +112,8 @@ PostgreSQL. The first old-consumer upgrade requires the maintenance procedure in
 ## Schema and extension policy
 
 Migration connections pin `search_path=public` so a login named `taskflow` cannot confuse schema
-reflection. All application DDL remains explicitly schema-qualified. Current Alembic head is `0004`: initial schema, optional estimates, business guards, notification
-claim/delivery diagnostics. See [DATA_MODEL.md](DATA_MODEL.md) for fields, indexes and rollback limits.
+reflection. All application DDL remains explicitly schema-qualified. Current Alembic head is `0005`: initial schema, optional estimates, business guards, notification
+claim/delivery diagnostics, collaborative task roles and fixed-price templates. See [DATA_MODEL.md](DATA_MODEL.md) for fields, indexes and rollback limits.
 Add a new migration for schema changes; do not rewrite applied revisions or create provider UI tables.
 Change scoring/access/idempotency only with business and real PostgreSQL regression tests.
 Preserve the small MIT pagination attribution documented in [OPEN_SOURCE.md](OPEN_SOURCE.md).

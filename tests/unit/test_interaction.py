@@ -150,7 +150,151 @@ def test_task_confirmation_names_task_and_uses_award_snapshot():
 
     from app.services.ui import UIService
 
-    task = SimpleNamespace(title="<Task>", status="DONE", rated_points=999, awarded_points=500)
+    task = SimpleNamespace(
+        title="<Task>", status="DONE", rated_points=999, awarded_points=500, kind="PERSONAL"
+    )
     text = UIService.status_confirmation(task, "TODO")
     assert "&lt;Task&gt;" in text and "500" in text and "999" not in text
     assert "исходной недели" in text
+
+
+@pytest.mark.parametrize("status", ["TODO", "IN_PROGRESS"])
+def test_rerate_notification_shows_original_new_price_and_preserves_status(status):
+    from app.models import Notification
+    from app.notifications.messages import notification_message
+
+    row = Notification(
+        kind="rated",
+        payload={
+            "task_id": 1,
+            "title": "<task>",
+            "evaluator": "<peer>",
+            "points": 700,
+            "old_points": 500,
+            "status": status,
+        },
+    )
+    text, markup = notification_message(row, 0)
+    assert "500 → 700" in text and "&lt;task&gt;" in text and "&lt;peer&gt;" in text
+    assert ("остаётся в работе" in text) == (status == "IN_PROGRESS")
+    assert markup.inline_keyboard[0][0].callback_data.startswith("a:task:1:")
+
+
+def test_rejection_notification_escapes_author_and_title():
+    from app.models import Notification
+    from app.notifications.messages import notification_message
+
+    text, markup = notification_message(
+        Notification(
+            kind="task_rejected", payload={"task_id": 5, "title": "<task>", "actor": "<peer>"}
+        ),
+        0,
+    )
+    assert "отклонено" in text and "&lt;task&gt;" in text and "&lt;peer&gt;" in text
+    assert markup.inline_keyboard[0][0].callback_data.startswith("a:task:5:")
+
+
+def test_new_partial_target_and_template_form_validation():
+    from app.bot.states.forms import TemplateForm
+
+    assert draft_valid(TaskForm.target.state, {"flow": 1, "key": "key", "target": "SELF"})
+    assert not draft_valid(TaskForm.target.state, {"flow": 1, "key": "key", "target": "OTHER"})
+    assert not draft_valid(
+        TemplateForm.field.state, {"flow": 1, "key": "key", "field": "estimated_minutes"}
+    )
+    assert draft_valid(
+        TemplateForm.field.state,
+        {"flow": 1, "key": "key", "field": "estimated_minutes", "title": "Template", "points": 400},
+    )
+
+
+@pytest.mark.parametrize(
+    "current,fields",
+    [
+        ("TaskForm:draft", {"title": "Draft", "template_id": 1, "template_version": 1}),
+        (
+            "TaskForm:draft",
+            {"title": "Draft", "template_id": 1, "template_version": 1, "template_snapshot": "bad"},
+        ),
+        (
+            "TaskForm:draft",
+            {
+                "title": "Draft",
+                "template_id": 1,
+                "template_version": 1,
+                "template_snapshot": {"title": "Snapshot", "proposed_points": 500},
+            },
+        ),
+        (
+            "TaskForm:draft",
+            {
+                "title": "Draft",
+                "template_id": 1,
+                "template_version": 1,
+                "template_snapshot": {
+                    "title": "Snapshot",
+                    "proposed_points": True,
+                    "estimated_minutes": None,
+                },
+            },
+        ),
+        ("TaskForm:points", {"title": "Draft", "save_template": True}),
+        ("TaskForm:points", {"title": "Draft", "save_template": True, "template_save_key": 123}),
+        ("TaskForm:draft", {"title": "Draft", "estimated_minutes": "60"}),
+        ("TaskForm:draft", {"title": "Draft", "proposed_points": [500]}),
+        ("RatingForm:points", {"task_id": 1, "task_version": 1, "rerate": True}),
+        (
+            "RatingForm:points",
+            {"task_id": 1, "task_version": 1, "rerate": True, "old_points": "500"},
+        ),
+        ("RatingForm:points", {"task_id": True, "task_version": 1}),
+        ("TemplateForm:field", {"field": ["title"]}),
+        ("TemplateForm:field", {"field": "unknown"}),
+        ("TemplateForm:field", {"field": "points", "title": 3}),
+        ("TemplateForm:field", {"field": "title", "template_edit_id": 1}),
+        ("TemplateForm:field", {"field": "estimated_minutes", "title": "Template", "points": True}),
+        (
+            "ConfirmationForm:action",
+            {"confirmation": {"name": "rerate_confirm", "entity": 1, "version": 1}},
+        ),
+    ],
+)
+def test_collaborative_persisted_draft_missing_or_malformed_values_recover(current, fields):
+    assert not draft_valid(current, {"flow": 1, "key": "draft-key", **fields})
+
+
+@pytest.mark.parametrize(
+    "current,fields",
+    [
+        ("TaskForm:title", {}),
+        ("TaskForm:target", {"target": "SELF"}),
+        (
+            "TaskForm:draft",
+            {
+                "title": "Draft",
+                "template_id": 1,
+                "template_version": 1,
+                "template_snapshot": {
+                    "title": "Template",
+                    "proposed_points": 500,
+                    "estimated_minutes": None,
+                },
+            },
+        ),
+        (
+            "TaskForm:points",
+            {"title": "Draft", "save_template": True, "template_save_key": "save-key"},
+        ),
+        ("RatingForm:points", {"task_id": 1, "task_version": 1}),
+        ("RatingForm:points", {"task_id": 1, "task_version": 1, "rerate": True, "old_points": 500}),
+        ("TemplateForm:field", {"field": "title"}),
+        ("TemplateForm:field", {"field": "points", "title": "Template"}),
+        ("TemplateForm:field", {"field": "estimated_minutes", "title": "Template", "points": 500}),
+        (
+            "TemplateForm:field",
+            {"field": "title", "template_edit_id": 1, "template_edit_version": 1},
+        ),
+    ],
+)
+def test_collaborative_valid_partial_drafts_remain_usable(current, fields):
+    assert draft_valid(current, {"flow": 1, "key": "draft-key", **fields})
