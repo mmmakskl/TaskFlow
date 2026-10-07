@@ -292,8 +292,9 @@ async def test_send_failure_not_retried_and_cooldown_kept(
         ).status == status
 
 
+@pytest.mark.parametrize("retry_after", [30, 7200])
 async def test_explicit_rate_limit_defers_rating_without_collision(
-    factory, settings, telegram, monkeypatch
+    factory, settings, telegram, monkeypatch, retry_after
 ):
     await create_task(factory, settings, "rate-limited")
     await due(factory)
@@ -302,7 +303,7 @@ async def test_explicit_rate_limit_defers_rating_without_collision(
     async def rate_limited(*args, **kwargs):
         # A producer can queue another batch while this API request is in flight.
         await create_task(factory, settings, "during-send")
-        raise TelegramRetryAfter(method, "wait", retry_after=30)
+        raise TelegramRetryAfter(method, "wait", retry_after=retry_after)
 
     monkeypatch.setattr(telegram[0], "send_message", rate_limited)
     assert await send_notification(factory, telegram[0], settings)
@@ -312,6 +313,10 @@ async def test_explicit_rate_limit_defers_rating_without_collision(
                 select(func.count(Notification.id)).where(Notification.status == "pending")
             )
             == 1
+        )
+        row = await session.scalar(select(Notification).where(Notification.status == "pending"))
+        assert row.available_at >= await NotificationRepository(session).now() + timedelta(
+            seconds=retry_after - 5
         )
     await due(factory)
     assert not await send_notification(factory, telegram[0], settings)

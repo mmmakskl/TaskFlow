@@ -54,7 +54,7 @@ async def send_notification(
             if retry_after is not None:
                 if row.kind == "rating_pending":
                     # A new batch may already exist. The partial unique index coalesces it.
-                    await repo.enqueue_rating(user.id, retry_after)
+                    await repo.enqueue_rating(user.id, retry_after, defer_existing=True)
                 elif current.attempts < 3:
                     current.status, current.finished_at = "pending", None
                     current.available_at = now + timedelta(seconds=retry_after)

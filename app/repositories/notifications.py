@@ -27,25 +27,38 @@ class NotificationRepository(Repository):
         assert isinstance(now, datetime)
         return now
 
-    async def enqueue_rating(self, evaluator_id: int, debounce_seconds: int) -> None:
+    async def enqueue_rating(
+        self, evaluator_id: int, debounce_seconds: int, *, defer_existing: bool = False
+    ) -> None:
         now = await self.now()
-        await self.session.execute(
-            insert(Notification)
-            .values(
-                recipient_user_id=evaluator_id,
-                kind="rating_pending",
-                payload={},
-                dedupe_key=f"rating:{uuid4()}",
-                status="pending",
-                available_at=now + timedelta(seconds=debounce_seconds),
-                created_at=now,
-            )
-            .on_conflict_do_nothing(
-                index_elements=[Notification.recipient_user_id],
-                index_where=(Notification.kind == "rating_pending")
-                & (Notification.status == "pending"),
-            )
+        statement = insert(Notification).values(
+            recipient_user_id=evaluator_id,
+            kind="rating_pending",
+            payload={},
+            dedupe_key=f"rating:{uuid4()}",
+            status="pending",
+            available_at=now + timedelta(seconds=debounce_seconds),
+            created_at=now,
         )
+        pending = (Notification.kind == "rating_pending") & (Notification.status == "pending")
+        if defer_existing:
+            # Explicit Telegram backoff can exceed our cooldown; never shorten it when
+            # another producer already queued a pending batch during the send attempt.
+            statement = statement.on_conflict_do_update(
+                index_elements=[Notification.recipient_user_id],
+                index_where=pending,
+                set_={
+                    "available_at": func.greatest(
+                        Notification.available_at, statement.excluded.available_at
+                    )
+                },
+            )
+        else:
+            statement = statement.on_conflict_do_nothing(
+                index_elements=[Notification.recipient_user_id],
+                index_where=pending,
+            )
+        await self.session.execute(statement)
 
     async def expire_inflight(self, now: datetime) -> None:
         await self.session.execute(
