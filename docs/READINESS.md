@@ -40,3 +40,30 @@ Notifications favor at-most-once send attempts over guaranteed delivery after am
 - The user chose to defer real Vika peer-rating/completion/reopen acceptance. Those flows are verified by actual PostgreSQL and aiogram tests, not claimed as live two-account chat checks.
 
 No external secrets remain unconfigured. Render Free cold-start delays are accepted by the account owner. Outstanding invoices shown by Supabase belong to another organization; TaskFlow provisioned and operated successfully, and no payment action was performed.
+
+## Production startup release — 2026-10-07
+
+- Release PR: https://github.com/mmmakskl/TaskFlow/pull/4, code commit `fe20aa8`.
+- GitHub Actions run `37575930948` passed all checks: Ruff, mypy, PostgreSQL tests,
+  dependency audit and production Docker build. The frozen release Docker test target passed
+  **387 tests**, coverage 73%, on Python 3.12 with PostgreSQL 15.
+- The final production image starts as UID 10001 with a read-only root filesystem, dropped
+  capabilities and external PostgreSQL 17. Health and readiness return 200. Fresh startup
+  applies revisions 0001–0004 before accepting requests. Signed duplicate synthetic updates
+  produce one processed inbox record; unsigned requests return 403.
+- A locally created task and processed inbox record survived container shutdown, restart and
+  replacement with the final release image. SIGTERM completed graceful worker/resource shutdown.
+- Production PostgreSQL 17 backup restored successfully into an isolated PostgreSQL 17 database;
+  upgrading the restored schema from 0002 to 0004 retained all three tasks and four score events.
+  Backup and pre-deploy business fingerprints are retained privately outside the repository.
+- `render.yaml` passed Render's published JSON Schema. Production startup validates configuration,
+  locks migrations, ensures the webhook URL and secret, and fails readiness if its worker stops.
+
+### Release status
+
+The new release has **not yet been deployed**. The previously live service remains on its older
+release and schema 0002. Render auto-deploy was temporarily switched Off to prevent incompatible
+old/new notification consumers overlapping. Complete the maintenance procedure in DEPLOYMENT.md,
+then restore After CI Checks Pass. Browser control became unavailable (`cgWindowNotFound`) before
+release rollout; Render logs, new-release Telegram delivery and production redeploy persistence
+must still be verified. Local Docker checks and the backup restore do not prove those live checks.
