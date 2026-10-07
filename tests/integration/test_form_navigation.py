@@ -221,6 +221,10 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
 
     from sqlalchemy import text
 
+    from tests.integration.test_business_migrations import alembic
+
+    code, output = await alembic(settings, "downgrade", "0002")
+    assert code == 0, output
     async with factory.begin() as session:
         await session.execute(text("ALTER TABLE taskflow.tasks DROP COLUMN estimated_minutes"))
         await session.execute(text("UPDATE public.alembic_version SET version_num = '0001'"))
@@ -243,7 +247,7 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
         task = await session.scalar(select(Task))
         assert task.title == "Existing task" and task.estimated_minutes is None
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0002"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
         )
 
 
@@ -253,7 +257,7 @@ async def test_fixed_penalty_back_returns_to_types(factory, settings):
 
     async with factory.begin() as session:
         actor = await session.scalar(select(User).where(User.role == "max"))
-        await PenaltyService(Repository(session)).configure(
+        await PenaltyService(Repository(session), settings).configure(
             actor,
             None,
             name="Фиксированный",

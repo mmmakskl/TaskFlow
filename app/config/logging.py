@@ -53,5 +53,15 @@ def configure_logging(settings: Settings) -> None:
         )
     )
     logging.basicConfig(level=settings.log_level, handlers=[handler], force=True)
+    # Uvicorn installs its own non-propagating handlers before importing the app.
+    # ASGI failures must use the same redaction as worker and startup failures.
+    for name in ("uvicorn", "uvicorn.error"):
+        server_logger = logging.getLogger(name)
+        server_logger.handlers = []
+        server_logger.propagate = True
+    access_logger = logging.getLogger("uvicorn.access")
+    access_enabled = bool(access_logger.handlers) or access_logger.propagate
+    access_logger.handlers = []
+    access_logger.propagate = access_enabled
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)

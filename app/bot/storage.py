@@ -28,15 +28,23 @@ class PostgresStorage(BaseStorage):
         dialog.state = state.state if isinstance(state, State) else state
         await current_session.get().flush()
 
+    async def find_dialog(self, key: StorageKey) -> Dialog | None:
+        # FSM loads before the access middleware. Reads must not allocate rows
+        # for unknown senders or group chats; only authorized handlers write.
+        name = f"{key.bot_id}:{key.chat_id}:{key.user_id}:{key.destiny}"
+        return await current_session.get().get(Dialog, name)
+
     async def get_state(self, key: StorageKey) -> str | None:
-        return (await self.dialog(key)).state
+        dialog = await self.find_dialog(key)
+        return dialog.state if dialog else None
 
     async def set_data(self, key: StorageKey, data: Mapping[str, Any]) -> None:
         (await self.dialog(key)).data = dict(data)
         await current_session.get().flush()
 
     async def get_data(self, key: StorageKey) -> dict[str, Any]:
-        return dict((await self.dialog(key)).data)
+        dialog = await self.find_dialog(key)
+        return dict(dialog.data) if dialog else {}
 
     async def close(self) -> None:
         pass

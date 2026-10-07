@@ -1,32 +1,61 @@
 # Repository Guidelines
 
-## Product and Architecture
+## Architecture and Ownership
 
-TaskFlow is a private Telegram task and points app for Max and Vika. Use Python 3.12+, aiogram 3, FastAPI, SQLAlchemy async, PostgreSQL and Alembic. Telegram handlers call services; services call repositories. Keep business rules out of handlers. Production uses a secret-verified webhook, never polling.
+TaskFlow: private tasks/points bot for Max and Vika.
+Python 3.12+, aiogram 3, FastAPI, async SQLAlchemy, PostgreSQL, Alembic.
+`webhook → durable inbox → routers → services → repositories → PostgreSQL`;
+an outbox loop delivers notifications.
 
-## Project Structure
+`app/bot/` owns routers, keyboards, callback/FSM guards and rendering;
+`app/services/` owns business rules; `app/repositories/` owns queries/locks;
+`app/models/`, `app/schemas/`: entities/validation; `app/db/`, `alembic/`: pool/seed/DDL; `app/web/` owns HTTP/lifecycle; `app/notifications/` owns delivery.
+`tests/{unit,integration}/`: tests; `docs/`: runbooks.
 
-`app/bot/` contains handlers, keyboards, callbacks, middleware and persistent FSM storage. `app/services/` owns business rules; `app/repositories/` owns queries. Models live in `app/models/`, database setup in `app/db/`, HTTP endpoints in `app/web/`, and durable workers in `app/notifications/`. Use `tests/unit/`, `tests/integration/`, `alembic/versions/` and `docs/` for their respective concerns.
+## Business Invariants
 
-## Commands and Style
+- Authenticate the ENV-configured Telegram sender in their matching private chat. Exactly two users;
+  sender owns tasks; peer rates.
+- Create BACKLOG; peer rating → TODO; TODO → IN_PROGRESS/DONE; IN_PROGRESS → TODO/DONE.
+  Cancellation requires confirmation; CANCELLED is terminal. Leaving DONE requires confirmation.
+- Completion stores `awarded_points`; count by `completed_at`, never task creation/rating date.
+  Sum immutable score events in shared `DEFAULT_TIMEZONE` Monday-to-Monday bounds.
+- Reopen reverses the original award in its original week; penalty deletion compensates its original
+  week. Insert score/audit events, never rewrite history. CANCELLED contributes no award.
+- Penalties retain immutable calculation snapshots; reject changed previews.
+- Mutations: transactions, row/version locks, operation keys; caller commits.
+- Rating batches debounce; PostgreSQL cooldown permits at most one attempt/hour/user across restarts.
+  Never replay ambiguous sends.
 
-Run `make dev`, copy `.env.example` to `.env`, then `make migrate` and `make run`. `make test` runs pytest; integration requires a disposable `TEST_DATABASE_URL` ending in `_test`. `make lint`, `make typecheck` and `make check` are quality gates. `make docker` builds production; `docker build --target test -t taskflow:test .` runs PostgreSQL tests inside Docker.
+## Commands, Migrations and Tests
 
-Use four spaces, typed Python functions, snake_case names and PascalCase classes. Ruff formats to 100 columns; mypy checks application code. Tests use `test_*.py` and pytest-asyncio.
+`make dev`, `make migrate`, `make run`; `make lint`, `make typecheck`, `make test`, `make check`.
+Export disposable `TEST_DATABASE_URL` ending `_test`; tests destroy its schema. Skips are not passes.
+Focused gates: `make test-business-unit`, `make test-business`, `make test-ux`.
+`make docker`; `docker build --target test -t taskflow:test .` runs isolated PostgreSQL tests.
 
-## Invariants
+Schema: reviewed revision,
+`make migration message="description"`, empty/populated upgrades, rollback analysis.
+Never edit applied revisions. Invariant changes require regression tests. Use typed four-space
+Python, Ruff (100 columns), mypy, pytest-asyncio; conventional commits, PR test/migration evidence.
 
-- Only the two ENV-configured Telegram accounts have access; the opposite user rates a task.
-- Count completed points by `completed_at`, never `created_at`; `awarded_points` is a snapshot.
-- Existing penalties retain snapshots when their types change.
-- Reopen and deletion append compensating score events and audit events; never mutate history.
-- Rating notifications allow at most one attempt per hour per user, with PostgreSQL cooldown and locking.
-- Duplicate callbacks must not duplicate mutations, awards or penalties.
-- Schema changes require Alembic migrations and regression tests: `make migration message="description"`, review SQL, then `make migrate`.
-- Production data and FSM never depend on local files.
+## UX and Production
 
-## Security, UX and Delivery
+UX: edited menu, inline buttons, Back/skips/presets, five-item pages, confirmations.
+`/menu` interrupts forms; reject stale buttons, escape text.
+Render Free Docker Web Service uses external Supabase PostgreSQL, verified-secret webhook,
+`/health` and `/ready`. Startup locks migrations, seeds/registers webhook; shutdown drains workers.
+Read `docs/{DEPLOYMENT,OPERATIONS,QA_REPORT}.md` before deploying.
+CI gates lint/types/tests/dependencies/Docker; verify live delivery/persistence.
 
-Keep credentials in ENV and Render secrets; redact logs. Validate callbacks, escape user text and preserve authorization. Prefer one edited menu, inline buttons, five-item pagination, optional-field skips and destructive confirmations.
+## DO NOT
 
-Use descriptive conventional commits (`feat:`, `fix:`, `docs:`). PRs explain changes, tests, migrations and UX examples. CI checks lint, types, PostgreSQL tests, dependencies and Docker. Render deploys the Docker web service after checks pass; migrations acquire a session advisory lock. Never change scoring, access, snapshots, cooldown or migration rules without tests. See `docs/OPERATIONS.md` before deployment or rollback.
+- Put business logic in handlers.
+- Use SQLite in production or depend on local files for production data/FSM.
+- Recalculate historical penalties from current `penalty_types`.
+- Derive completed score from current `rated_points`.
+- Bypass Alembic.
+- Use long polling in production.
+- Commit secrets or log credentials/private payloads.
+- Remove idempotency protections.
+- Send one rating notification per task.

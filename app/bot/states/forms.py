@@ -31,3 +31,7 @@ class SettingsForm(StatesGroup):
     type_rate = State()
     type_edit = State()
     target = State()
+
+
+class ConfirmationForm(StatesGroup):
+    action = State()

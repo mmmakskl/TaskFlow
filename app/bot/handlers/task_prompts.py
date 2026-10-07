@@ -25,6 +25,8 @@ async def deadline_prompt(bot: Bot, actor: User, state: FSMContext) -> None:
     flow = await step(state, TaskForm.deadline)
     data = await state.get_data()
     rows = []
+    if not data.get("edit_id"):
+        rows.append([button("✅ Создать без деталей", "task_save", version=flow)])
     if data.get("deadline"):
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -70,7 +72,7 @@ async def comment_prompt(bot: Bot, actor: User, state: FSMContext) -> None:
         bot,
         actor.telegram_id,
         state,
-        "💬 <b>Комментарий</b>\n\nДобавить детали задачи?",
+        "💬 <b>Комментарий</b>\n\nНапиши детали сюда или пропусти этот шаг.",
         keyboard(
             [button("Пропустить", "comment_skip", version=flow)],
             [button("✏️ Добавить комментарий", "comment_add", version=flow)],

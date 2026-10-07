@@ -1,5 +1,32 @@
 # Production readiness evidence
 
+## Fresh final review
+
+See [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md) for the fresh code-first audit, three additional
+fixes and current verification. Earlier sections below are historical checkpoints.
+
+## Documentation handoff verification — 2026-10-07
+
+README and all required handoff guides now describe the actual revision-0004 application.
+Clean native onboarding (Python 3.14/PostgreSQL 16) and Docker test stage
+(Python 3.12/PostgreSQL 15) each pass **424 tests**, zero skips.
+The pass exposed and fixed Alembic reflection for a login/search path named `taskflow`;
+see QA-007 and exact command evidence in [QA_REPORT.md](QA_REPORT.md).
+HTTPS development tunnel and native/Compose health/ready/unsigned-webhook checks passed.
+This is local verification, not new-release Render or real two-account Telegram acceptance.
+The production rollout gate below remains open work.
+
+
+## Latest release gate — independent QA, 2026-10-07
+
+**Not production ready:** the audited new release still requires its Render rollout, live Telegram
+webhook delivery and persistence check after actual redeploy. See [QA_REPORT.md](QA_REPORT.md) for
+six reproduced/fixed findings, the scenario matrix and remaining risks. The final frozen Docker
+suite passed **423 tests**, coverage 74%, lint/types and dependency audit. Thirty-six new independent
+cases passed against PostgreSQL 17; actual isolated PostgreSQL restart and application-container
+replacement preserved eleven tasks and the rating cooldown. Older evidence below is historical and
+does not establish acceptance of this new release.
+
 ## Verified before deployment
 
 - Private GitHub repository: `mmmakskl/TaskFlow`.
@@ -40,3 +67,30 @@ Notifications favor at-most-once send attempts over guaranteed delivery after am
 - The user chose to defer real Vika peer-rating/completion/reopen acceptance. Those flows are verified by actual PostgreSQL and aiogram tests, not claimed as live two-account chat checks.
 
 No external secrets remain unconfigured. Render Free cold-start delays are accepted by the account owner. Outstanding invoices shown by Supabase belong to another organization; TaskFlow provisioned and operated successfully, and no payment action was performed.
+
+## Production startup release — 2026-10-07
+
+- Release PR: https://github.com/mmmakskl/TaskFlow/pull/4, code commit `fe20aa8`.
+- GitHub Actions run `37575930948` passed all checks: Ruff, mypy, PostgreSQL tests,
+  dependency audit and production Docker build. The frozen release Docker test target passed
+  **387 tests**, coverage 73%, on Python 3.12 with PostgreSQL 15.
+- The final production image starts as UID 10001 with a read-only root filesystem, dropped
+  capabilities and external PostgreSQL 17. Health and readiness return 200. Fresh startup
+  applies revisions 0001–0004 before accepting requests. Signed duplicate synthetic updates
+  produce one processed inbox record; unsigned requests return 403.
+- A locally created task and processed inbox record survived container shutdown, restart and
+  replacement with the final release image. SIGTERM completed graceful worker/resource shutdown.
+- Production PostgreSQL 17 backup restored successfully into an isolated PostgreSQL 17 database;
+  upgrading the restored schema from 0002 to 0004 retained all three tasks and four score events.
+  Backup and pre-deploy business fingerprints are retained privately outside the repository.
+- `render.yaml` passed Render's published JSON Schema. Production startup validates configuration,
+  locks migrations, ensures the webhook URL and secret, and fails readiness if its worker stops.
+
+### Release status
+
+The new release has **not yet been deployed**. The previously live service remains on its older
+release and schema 0002. Render auto-deploy was temporarily switched Off to prevent incompatible
+old/new notification consumers overlapping. Complete the maintenance procedure in DEPLOYMENT.md,
+then restore After CI Checks Pass. Browser control became unavailable (`cgWindowNotFound`) before
+release rollout; Render logs, new-release Telegram delivery and production redeploy persistence
+must still be verified. Local Docker checks and the backup restore do not prove those live checks.

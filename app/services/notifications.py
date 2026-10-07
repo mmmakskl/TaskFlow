@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
-
 from app.config.settings import Settings
-from app.models import Notification, Task, User
+from app.models import Notification, User
 from app.repositories.base import Repository
-from app.utils.time import utcnow
+from app.repositories.notifications import NotificationRepository
 
 
 def cooldown_ready(last: datetime | None, now: datetime, minutes: int) -> bool:
@@ -14,45 +12,48 @@ def cooldown_ready(last: datetime | None, now: datetime, minutes: int) -> bool:
 
 class NotificationService:
     def __init__(self, repo: Repository, settings: Settings) -> None:
-        self.repo, self.settings = repo, settings
+        self.repo = (
+            repo
+            if isinstance(repo, NotificationRepository)
+            else NotificationRepository(repo.session)
+        )
+        self.settings = settings
 
     async def claim(self) -> tuple[Notification, User, int] | None:
-        now = utcnow()
-        notification = await self.repo.session.scalar(
-            select(Notification)
-            .where(Notification.status == "pending", Notification.available_at <= now)
-            .order_by(Notification.id)
-            .limit(1)
-            .with_for_update(skip_locked=True)
-        )
+        now = await self.repo.now()
+        notification = await self.repo.next_due(now)
         if notification is None:
             return None
-        user = await self.repo.get(User, notification.recipient_user_id, lock=True)
+        user = await self.repo.recipient(notification.recipient_user_id)
+        now = await self.repo.now()
         if user.telegram_id not in self.settings.authorized_ids:
             notification.status = "skipped"
+            notification.finished_at = now
+            notification.error_code = "unauthorized"
             return None
         count = 0
         if notification.kind == "rating_pending":
-            count = int(
-                await self.repo.session.scalar(
-                    select(func.count(Task.id)).where(
-                        Task.evaluator_user_id == user.id,
-                        Task.status == "BACKLOG",
-                        Task.deleted_at.is_(None),
-                    )
-                )
-                or 0
-            )
-            if count == 0 or not cooldown_ready(
+            count = await self.repo.pending_count(user.id)
+            if count == 0:
+                notification.status = "skipped"
+                notification.finished_at = now
+                return None
+            if not cooldown_ready(
                 user.last_rating_notification_at,
                 now,
                 self.settings.rating_notification_cooldown_minutes,
             ):
-                notification.status = "skipped"
+                assert user.last_rating_notification_at is not None
+                notification.available_at = user.last_rating_notification_at + timedelta(
+                    minutes=self.settings.rating_notification_cooldown_minutes
+                )
                 return None
             user.last_rating_notification_at = now
         # Commit before contacting Telegram. An ambiguous network failure is NOT retried:
         # Telegram sendMessage has no idempotency key; this trades possible omission for no spam.
         notification.status = "sending"
-        await self.repo.session.flush()
+        notification.claimed_at = now
+        notification.attempts += 1
+        notification.error_code = None
+        await self.repo.flush()
         return notification, user, count

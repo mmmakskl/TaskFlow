@@ -1,3 +1,4 @@
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -52,6 +53,21 @@ class Settings(BaseSettings):
             raise ValueError("Only PostgreSQL is supported")
         if self.register_webhook and not self.webhook_base_url.startswith("https://"):
             raise ValueError("Webhook base URL must use HTTPS")
+        if self.environment == "production" and not self.register_webhook:
+            raise ValueError("Production requires Telegram webhook registration")
+        if self.register_webhook:
+            base = urlsplit(self.webhook_base_url)
+            if (
+                not base.hostname
+                or base.username
+                or base.password
+                or base.path not in ("", "/")
+                or base.query
+                or base.fragment
+            ):
+                raise ValueError(
+                    "Webhook base URL must be an HTTPS origin without credentials/path/query"
+                )
         if len(self.user_max_name) > 50 or len(self.user_vika_name) > 50:
             raise ValueError("Display names must be at most 50 characters")
         return self

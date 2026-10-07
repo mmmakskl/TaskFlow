@@ -10,7 +10,7 @@ COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
 RUN pip-audit -r requirements.txt --disable-pip --no-deps
-RUN ruff check app tests alembic && ruff format --check app tests alembic && mypy app
+RUN ruff check app tests alembic tools && ruff format --check app tests alembic tools && mypy app
 RUN install -d -o postgres /tmp/taskflow-pg && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/initdb -D /tmp/taskflow-pg -A trust --encoding=UTF8 && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/pg_ctl -D /tmp/taskflow-pg -l /tmp/taskflow-pg.log -o "-h 127.0.0.1" start && \
@@ -24,4 +24,5 @@ COPY --chown=taskflow:taskflow alembic alembic
 COPY --chown=taskflow:taskflow alembic.ini .
 USER taskflow
 EXPOSE 10000
-CMD ["sh", "-c", "python -m app.db.migrate && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --no-access-log"]
+STOPSIGNAL SIGTERM
+CMD ["python", "-m", "app.startup"]

@@ -16,6 +16,7 @@ def database(settings: Settings) -> tuple[AsyncEngine, async_sessionmaker[AsyncS
         pool_size=3,
         max_overflow=2,
         pool_pre_ping=True,
-        connect_args={"command_timeout": 30, "statement_cache_size": 0},
+        pool_timeout=5,
+        connect_args={"timeout": 10, "command_timeout": 30, "statement_cache_size": 0},
     )
     return engine, async_sessionmaker(engine, expire_on_commit=False)

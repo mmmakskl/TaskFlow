@@ -1,27 +1,119 @@
 # Architecture
 
-## Modules and update flow
+This document describes implemented code, not a proposed rewrite. Release verification and blockers
+live in [QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md).
 
-FastAPI validates the constant-time webhook secret before parsing a bounded 64 KiB request. It inserts the update ID into the durable inbox and acknowledges only after commit. Duplicate IDs return success without another row.
+## Modules and dependencies
 
-A background worker reads inbox rows in Telegram update order. A PostgreSQL transaction advisory lock serializes the two-user application's state changes and FSM across service replicas. aiogram access middleware checks the ENV allow-list and private sender/chat identity. Handlers render screens and translate input; services enforce rules and repositories issue bound ORM queries.
+TaskFlow is one Python application with an HTTP server and two asynchronous worker loops.
+There is no separate REST business API, JWT, Redis, scheduler service or polling process.
 
-FSM state and menu message IDs live in `dialogs`, not memory or Redis. A redeploy can resume an unfinished form. Callbacks carry record versions or random form generations; expired buttons produce safe feedback. Entity mutations use row locks and expected versions. Creation operations additionally use unique operation keys and transaction advisory locks.
+| Module | Responsibility |
+| --- | --- |
+| `app/main.py`, `app/startup.py` | App construction; production migration then Uvicorn entrypoint |
+| `app/web/application.py`, `webhook.py`, `validation.py` | Lifespan, health/readiness, secret-verified durable ingestion, webhook setup |
+| `app/bot/dispatcher.py`, `handlers/`, `middlewares/` | aiogram routing, actor binding, form orchestration and stale-input guards |
+| `app/bot/storage.py`, `render.py`, `keyboards/`, `states/`, `callbacks/` | PostgreSQL FSM, edited-message UI and callback contracts |
+| `app/services/` | Authorization, validation, mutations, results and UI presentation |
+| `app/repositories/` | Queries, bounded lists, row/advisory locks, outbox enqueue and audit inserts |
+| `app/models/entities.py`, `app/schemas/penalties.py` | SQLAlchemy metadata and validated confirmation preview |
+| `app/db/`, `alembic/` | Pool, idempotent seed, serialized migrations |
+| `app/notifications/worker.py`, `delivery.py`, `messages.py` | Ordered update processing, outbox claims and Bot API delivery |
+| `app/utils/`, `app/config/` | UTC/calendar/duration/text utilities, settings and log redaction |
+| `tools/` | Local UX preview and production probe; not public endpoints |
 
-## Scoring and history
+Handlers orchestrate forms and call services; repositories own persistence. `UIService` builds compact
+screens but does not own scoring mutations. Service methods accept a persisted authenticated actor,
+revalidate its identity, and do not trust callback-supplied user identity.
 
-`score_events` is an append-only signed ledger. Completing a rated task records its awarded snapshot at completion time. Reopening adds an equal negative event effective in the original completion week. Completing it again records the new completion week. Penalty creation adds a negative snapshot amount; confirmed soft deletion reverses it in its original week. Database triggers reject UPDATE/DELETE of score and audit events.
+## HTTP and Telegram update flow
 
-Weeks are local Monday midnight through the next Monday, converted to UTC half-open intervals. Calendar arithmetic handles daylight saving changes. Shared scoring timezone comes from ENV; user timezone is only a display preference. Changing the shared timezone deliberately reinterprets historical week boundaries. Targets are current preferences, not historical target snapshots.
+1. Telegram POSTs to `/telegram/webhook`. Compare the secret header in constant time before ingestion.
+2. Require ready workers, a body ≤65,536 bytes and a valid PostgreSQL-compatible Telegram update.
+3. Insert `telegram_updates` with unique `update_id`; duplicate inserts do nothing. Commit before 200.
+4. The update loop takes transaction advisory lock `78421310` across replicas and selects the oldest
+   pending update. A not-yet-due head update delays later updates to preserve FSM order.
+5. aiogram loads durable state, enforces the two-user/private-chat allow-list and dispatches a router.
+   FSM reads do not allocate dialogs for unknown senders.
+6. A single outer transaction includes business mutation, score/audit events, FSM and outbox enqueue.
+   On success mark the inbox row done and erase its payload. Handler errors roll back before retry.
 
-## Notifications
+A failed update retries with bounded backoff, becoming failed after five attempts. The first failure
+can enqueue one safe error notice for an authorized private-chat sender. Done updates older than
+seven days are pruned. See [OPERATIONS.md](OPERATIONS.md) for recovery without bulk replay.
 
-Task creation queues one pending rating batch per recipient with a five-second debounce. A worker locks the recipient, recounts pending tasks and claims at most one send attempt in 60 minutes. It commits cooldown and `sending` status before contacting Telegram. Rated-task messages have unique deduplication keys. Unknown network outcomes are not retried: Telegram sendMessage lacks an idempotency key. This favors no spam over guaranteed notification delivery. The menu remains authoritative.
+## Transactions and concurrency
 
-## Failure and lifecycle
+`@atomic` service methods open savepoints; the caller owns the outer commit. Outside handlers, use
+`async with factory.begin() as session`. Never assume returning from a service has committed data.
+`SELECT FOR UPDATE` reloads existing entities so cached ORM state cannot overwrite a concurrent edit.
+Entity versions reject obsolete buttons/previews. Task/penalty creation also takes an operation-key
+advisory lock and relies on unique operation keys. Score/outbox dedupe keys guard duplicate effects.
 
-Unexpected handler exceptions roll back business writes and schedule bounded inbox retries; a safe error notice is queued once. Five failures become a dead letter. Logs identify update/action IDs and redact secrets. Shutdown waits for workers, closes the bot session and disposes database connections without unsetting a webhook registered by a newer replica.
+The update worker deliberately serializes this two-user workload across replicas. Notification
+workers run independently, claim due rows with `SKIP LOCKED`, and serialize cooldown reservations
+on the recipient using `FOR NO KEY UPDATE` (compatible with task-insert foreign-key locks).
+PostgreSQL constraints and immutable-event/snapshot triggers provide a second line of defense.
+No business data or FSM depends on a container filesystem.
 
-## Deployment boundaries
+## Scoring and calendar
 
-Docker runs migration and web server, with PostgreSQL storing every durable state. Migrations hold a session advisory lock across Alembic commits, so use a direct or session-pooled connection. The `taskflow` schema is private; Supabase Data API is disabled and autogenerate only examines this schema. No Redis, JWT, public business API, filesystem database or long polling is used.
+Results aggregate signed `score_events`, not live task ratings. DONE copies `rated_points` into
+`awarded_points` and appends a positive task event effective at `completed_at`. Reopen/cancel of DONE
+appends an equal negative event effective at the original completion, then clears the current award.
+A later completion posts a new award in its new completion week. Penalty creation posts negative
+points effective at its creation; soft deletion posts an original-date positive compensation.
+
+Week bounds are local Monday 00:00 to next Monday, converted to UTC, using the shared configurable
+`DEFAULT_TIMEZONE` (Europe/Helsinki). They are half-open and DST-aware. Per-user timezone affects
+screen dates/deadlines only. History uses the current shared timezone and current personal targets;
+there are no historical target snapshots or manual Week records.
+
+## Notification delivery
+
+Task creation enqueues one pending rating batch per evaluator via a partial unique index, initially
+due after the default five-second debounce. On claim, count current pending tasks and consult the
+PostgreSQL clock plus `users.last_rating_notification_at`. Empty queues skip; cooldown delays the
+batch until the next eligible time. Reservation commits before sending, at most one attempt per
+60 minutes per user. The cooldown survives replicas, process restarts and database restarts.
+
+Rating queues an owner notice; penalty creation queues a recipient notice. Other status changes
+produce no routine notices. Explicit Telegram rate-limit rejections may retry; ambiguous network
+failures become `uncertain` and are not replayed. Sending rows abandoned for five minutes also become
+uncertain. This trades possible omission for avoiding duplicate spam, not exactly-once delivery.
+See [NOTIFICATIONS.md](NOTIFICATIONS.md) for the complete state machine.
+
+## UI and callback safety
+
+FSM state, draft data, menu message ID and rendered screen live in `dialogs`. A new prompt changes
+its flow generation; callbacks carry entity/version or form generation rather than trusted business
+values. Confirmation checks the active FSM and stored intent. Navigation resets interrupted forms;
+Back preserves valid draft fields. `/start`, `/menu` and `/cancel` restore the menu.
+
+Render edits text or markup, tolerates unchanged text and replaces deleted/uneditable menu messages.
+Lists use five-item pagination; user HTML is escaped and button labels shortened. Safe DomainError
+messages stay in the current flow. Unexpected errors are logged with IDs; raw DB/secret details do
+not reach users. Telegram message edits are external effects and cannot participate in DB rollback;
+a retry can repeat an edit, while transactional business mutations remain protected.
+
+## Lifecycle and deployment
+
+`python -m app.startup` validates configuration, migrates to head under session advisory lock
+`78421309`, then execs Uvicorn as PID 1. Lifespan seeds users/types under a separate transaction lock,
+registers URL + secret with Telegram and starts workers. Production rejects disabled registration.
+Shutdown drains workers up to 25 seconds, closes resources, and leaves the webhook registered.
+
+`/health` is liveness only. `/ready` requires initialized app, live worker task and a DB probe with a
+five-second deadline. The DB pool is three connections plus two overflow per replica, with bounded
+checkout/connect/command timeouts. Render hosts a Free Docker Web Service; Supabase supplies persistent
+PostgreSQL. The first old-consumer upgrade requires the maintenance procedure in
+[DEPLOYMENT.md](DEPLOYMENT.md). Auto-deploy configuration and actual release status are distinct.
+
+## Schema and extension policy
+
+Migration connections pin `search_path=public` so a login named `taskflow` cannot confuse schema
+reflection. All application DDL remains explicitly schema-qualified. Current Alembic head is `0004`: initial schema, optional estimates, business guards, notification
+claim/delivery diagnostics. See [DATA_MODEL.md](DATA_MODEL.md) for fields, indexes and rollback limits.
+Add a new migration for schema changes; do not rewrite applied revisions or create provider UI tables.
+Change scoring/access/idempotency only with business and real PostgreSQL regression tests.
+Preserve the small MIT pagination attribution documented in [OPEN_SOURCE.md](OPEN_SOURCE.md).

@@ -17,7 +17,7 @@ class TaskRepository(Repository):
     async def list(
         self, actor: User, filter_name: str = "active", page: int = 0, pending: bool = False
     ) -> tuple[list[Task], int]:
-        if page < 0 or page > 100000 or filter_name not in FILTERS:
+        if type(page) is not int or not 0 <= page <= 100000 or filter_name not in FILTERS:
             raise DomainError("Недопустимая страница.")
         scope = Task.evaluator_user_id == actor.id if pending else Task.owner_user_id == actor.id
         statuses = ("BACKLOG",) if pending else FILTERS[filter_name]
@@ -30,6 +30,8 @@ class TaskRepository(Repository):
         return list(rows), count
 
     async def pending_next(self, actor: User, after_id: int = 0) -> tuple[Task | None, int]:
+        if type(after_id) is not int or not 0 <= after_id <= 2147483647:
+            raise DomainError("Недопустимая позиция списка.")
         conditions = (
             Task.evaluator_user_id == actor.id,
             Task.status == "BACKLOG",
@@ -47,3 +49,8 @@ class TaskRepository(Repository):
 
     async def by_operation(self, key: str) -> Task | None:
         return await self.session.scalar(select(Task).where(Task.operation_key == key))
+
+    async def enqueue_rating(self, evaluator_id: int, debounce_seconds: int) -> None:
+        from app.repositories.notifications import NotificationRepository
+
+        await NotificationRepository(self.session).enqueue_rating(evaluator_id, debounce_seconds)

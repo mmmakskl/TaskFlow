@@ -1,38 +1,43 @@
 from typing import Any
 
-from sqlalchemy import select
+from pydantic import ValidationError
 
-from app.models import Penalty, PenaltyType, ScoreEvent, User
+from app.config.settings import Settings
+from app.models import Notification, Penalty, PenaltyType, ScoreEvent, User
 from app.repositories.base import Repository
-from app.services.rules import DomainError, penalty_points, text_field
+from app.repositories.penalties import PenaltyRepository
+from app.schemas.penalties import PenaltyPreview
+from app.services.base import AuthorizedService
+from app.services.rules import DomainError, StaleAction, operation_key, penalty_points, text_field
+from app.services.transactions import atomic
 from app.utils.time import utcnow
 
 
-class PenaltyService:
-    def __init__(self, repo: Repository) -> None:
-        self.repo = repo
+class PenaltyService(AuthorizedService):
+    repo: PenaltyRepository
+
+    def __init__(self, repo: Repository, settings: Settings) -> None:
+        super().__init__(repo, settings)
+        self.repo = repo if isinstance(repo, PenaltyRepository) else PenaltyRepository(repo.session)
 
     async def kind(self, type_id: int) -> PenaltyType:
         return await self.repo.get(PenaltyType, type_id)
 
+    async def view(self, actor: User, penalty_id: int, version: int) -> Penalty:
+        await self.actor(actor)
+        penalty = await self.repo.get(Penalty, penalty_id)
+        self.repo.version(penalty, version)
+        if penalty.deleted_at:
+            raise StaleAction()
+        return penalty
+
     async def users(self) -> list[User]:
-        return await self.repo.users()
+        return await self.user_repo.participants()
 
     async def types(
         self, include_inactive: bool = False, page: int = 0
     ) -> tuple[list[PenaltyType], bool]:
-        if not 0 <= page <= 100000:
-            raise DomainError("Недопустимая страница.")
-        query = (
-            select(PenaltyType)
-            .order_by(PenaltyType.sort_order, PenaltyType.id)
-            .offset(page * 5)
-            .limit(6)
-        )
-        if not include_inactive:
-            query = query.where(PenaltyType.is_active.is_(True))
-        rows = list(await self.repo.session.scalars(query))
-        return rows[:5], len(rows) > 5
+        return await self.repo.types(include_inactive, page)
 
     async def preview(
         self, type_id: int, quantity: int | None, manual: int | None
@@ -52,6 +57,7 @@ class PenaltyService:
             "points": points,
         }
 
+    @atomic
     async def create(
         self,
         actor: User,
@@ -61,26 +67,39 @@ class PenaltyService:
         confirmed: bool = False,
         comment: str | None = None,
     ) -> Penalty:
-        if not confirmed:
+        actor = await self.actor(actor)
+        if confirmed is not True:
             raise DomainError("Сначала подтверди штраф.")
+        key = operation_key(key)
+        try:
+            draft = PenaltyPreview.model_validate(preview)
+        except ValidationError:
+            raise DomainError("Недопустимый черновик штрафа. Создай его заново.") from None
+        if comment is not None:
+            comment = text_field(comment, 1500, "Комментарий")
         await self.repo.operation_lock(key)
-        existing = await self.repo.session.scalar(
-            select(Penalty).where(Penalty.operation_key == key)
-        )
+        existing = await self.repo.by_operation(key)
         if existing:
             if existing.created_by_user_id != actor.id:
                 raise DomainError("Доступ запрещён.")
             return existing
         target = await self.repo.get(User, target_id)
-        if target.id not in [u.id for u in await self.repo.users()]:
+        if target.id not in [u.id for u in await self.user_repo.participants()]:
             raise DomainError("Пользователь недоступен.")
-        kind = await self.repo.get(PenaltyType, int(preview["type_id"]), lock=True)
-        self.repo.version(kind, int(preview["type_version"]))
+        kind = await self.repo.get(PenaltyType, draft.type_id, lock=True)
+        self.repo.version(kind, draft.type_version)
         if not kind.is_active:
             raise DomainError("Этот тип штрафа выключен. Выбери другой.")
-        manual = preview["points"] if kind.calculation_type == "MANUAL" else None
-        points = penalty_points(kind.calculation_type, kind.rate, preview.get("quantity"), manual)
-        if points != preview["points"]:
+        if (draft.name, draft.description, draft.calculation_type, draft.rate) != (
+            kind.name,
+            kind.description,
+            kind.calculation_type,
+            kind.rate,
+        ):
+            raise DomainError("Настройки изменились. Подтверди штраф заново.")
+        manual = draft.points if kind.calculation_type == "MANUAL" else None
+        points = penalty_points(kind.calculation_type, kind.rate, draft.quantity, manual)
+        if points != draft.points:
             raise DomainError("Настройки изменились. Подтверди штраф заново.")
         penalty = Penalty(
             target_user_id=target.id,
@@ -90,14 +109,14 @@ class PenaltyService:
             description_snapshot=kind.description,
             calculation_type_snapshot=kind.calculation_type,
             rate_snapshot=kind.rate,
-            quantity=preview.get("quantity"),
+            quantity=draft.quantity,
             points=points,
             comment=comment,
             operation_key=key,
         )
-        self.repo.session.add(penalty)
-        await self.repo.session.flush()
-        self.repo.session.add(
+        self.repo.add(penalty)
+        await self.repo.flush()
+        self.repo.add(
             ScoreEvent(
                 user_id=target.id,
                 category="penalty",
@@ -113,13 +132,29 @@ class PenaltyService:
             {},
             {"points": points, "target_id": target.id, "rate": kind.rate},
         )
-        await self.repo.session.flush()
+        self.repo.add(
+            Notification(
+                recipient_user_id=target.id,
+                kind="penalty_created",
+                payload={
+                    "penalty_id": penalty.id,
+                    "name": penalty.name_snapshot,
+                    "points": penalty.points,
+                    "actor": actor.display_name,
+                },
+                dedupe_key=f"penalty:{penalty.id}",
+                available_at=utcnow(),
+            )
+        )
+        await self.repo.flush()
         return penalty
 
+    @atomic
     async def delete(
         self, actor: User, penalty_id: int, version: int, confirmed: bool = False
     ) -> None:
-        if not confirmed:
+        actor = await self.actor(actor)
+        if confirmed is not True:
             raise DomainError("Подтверди удаление штрафа.")
         penalty = await self.repo.get(Penalty, penalty_id, lock=True)
         self.repo.version(penalty, version)
@@ -127,7 +162,7 @@ class PenaltyService:
             raise DomainError("Штраф уже удалён.")
         penalty.deleted_at = utcnow()
         penalty.version += 1
-        self.repo.session.add(
+        self.repo.add(
             ScoreEvent(
                 user_id=penalty.target_user_id,
                 category="penalty",
@@ -137,12 +172,17 @@ class PenaltyService:
             )
         )
         self.repo.audit(actor, penalty, "delete", {"points": penalty.points}, {"deleted": True})
-        await self.repo.session.flush()
+        await self.repo.flush()
 
+    @atomic
     async def configure(
         self, actor: User, type_id: int | None, version: int | None = None, **changes: Any
     ) -> PenaltyType:
-        if type_id:
+        actor = await self.actor(actor)
+        allowed = {"name", "emoji", "description", "calculation_type", "rate", "is_active"}
+        if not changes or not set(changes) <= allowed:
+            raise DomainError("Недопустимые настройки.")
+        if type_id is not None:
             kind = await self.repo.get(PenaltyType, type_id, lock=True)
             self.repo.version(kind, version or 0)
             old = {field: getattr(kind, field) for field in changes}
@@ -156,13 +196,12 @@ class PenaltyService:
                 is_active=True,
                 sort_order=100,
             )
-            self.repo.session.add(kind)
+            self.repo.add(kind)
             old = {}
-        allowed = {"name", "emoji", "description", "calculation_type", "rate", "is_active"}
-        if not set(changes) <= allowed:
-            raise DomainError("Недопустимые настройки.")
         for field, value in changes.items():
             if field in ("name", "emoji", "description"):
+                if not isinstance(value, str):
+                    raise DomainError("Введи текстовое значение.")
                 value = (
                     ""
                     if field == "description" and value == ""
@@ -179,26 +218,16 @@ class PenaltyService:
             elif field == "is_active" and type(value) is not bool:
                 raise DomainError("Недопустимое состояние.")
             setattr(kind, field, value)
+        text_field(kind.name, 80, "Название")
         if kind.calculation_type != "MANUAL" and kind.rate <= 0:
             raise DomainError("Для этого способа расчёта нужна ставка больше нуля.")
         if type_id:
             kind.version += 1
-        await self.repo.session.flush()
+        await self.repo.flush()
         self.repo.audit(
             actor, kind, "configure", old, {field: getattr(kind, field) for field in changes}
         )
         return kind
 
     async def list(self, page: int = 0) -> tuple[list[Penalty], bool]:
-        if not 0 <= page <= 100000:
-            raise DomainError("Недопустимая страница.")
-        rows = list(
-            await self.repo.session.scalars(
-                select(Penalty)
-                .where(Penalty.deleted_at.is_(None))
-                .order_by(Penalty.id.desc())
-                .offset(page * 5)
-                .limit(6)
-            )
-        )
-        return rows[:5], len(rows) > 5
+        return await self.repo.list(page)

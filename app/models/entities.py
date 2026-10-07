@@ -54,7 +54,11 @@ class User(TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64))
     weekly_target: Mapped[int] = mapped_column(Integer, default=10000)
     last_rating_notification_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    __table_args__ = (CheckConstraint("weekly_target > 0"),)
+    __table_args__ = (
+        CheckConstraint("weekly_target > 0"),
+        CheckConstraint("telegram_id > 0", name="ck_users_telegram_positive"),
+        CheckConstraint("length(display_name) BETWEEN 1 AND 50", name="ck_users_name"),
+    )
 
 
 class Task(TimestampMixin, Base):
@@ -91,6 +95,39 @@ class Task(TimestampMixin, Base):
         CheckConstraint(
             "status <> 'DONE' OR (completed_at IS NOT NULL AND awarded_points IS NOT NULL)"
         ),
+        CheckConstraint("version > 0", name="ck_tasks_version"),
+        CheckConstraint(
+            "status = 'DONE' OR (completed_at IS NULL AND awarded_points IS NULL)",
+            name="ck_tasks_no_uncompleted_award",
+        ),
+        CheckConstraint(
+            "(rated_points IS NULL AND rated_by_user_id IS NULL AND rated_at IS NULL) OR (rated_points IS NOT NULL AND rated_by_user_id IS NOT NULL AND rated_at IS NOT NULL)",
+            name="ck_tasks_rating_complete",
+        ),
+        CheckConstraint(
+            "status NOT IN ('TODO','IN_PROGRESS','DONE') OR rated_points IS NOT NULL",
+            name="ck_tasks_active_rated",
+        ),
+        CheckConstraint(
+            "status <> 'BACKLOG' OR rated_points IS NULL", name="ck_tasks_backlog_unrated"
+        ),
+        CheckConstraint(
+            "status <> 'CANCELLED' OR cancelled_at IS NOT NULL", name="ck_tasks_cancelled_at"
+        ),
+        Index(
+            "ix_tasks_active_owner_id",
+            "owner_user_id",
+            "id",
+            postgresql_where=text(
+                "deleted_at IS NULL AND status IN ('BACKLOG','TODO','IN_PROGRESS')"
+            ),
+        ),
+        Index(
+            "ix_tasks_pending_evaluator_id",
+            "evaluator_user_id",
+            "id",
+            postgresql_where=text("deleted_at IS NULL AND status = 'BACKLOG'"),
+        ),
         Index("ix_tasks_owner_status_id", "owner_user_id", "status", "id"),
         Index("ix_tasks_evaluator_status_id", "evaluator_user_id", "status", "id"),
         Index("ix_tasks_completed_at", "completed_at"),
@@ -113,6 +150,10 @@ class PenaltyType(TimestampMixin, Base):
         CheckConstraint("calculation_type IN ('PER_MINUTE','FIXED','MANUAL')"),
         CheckConstraint("rate BETWEEN 0 AND 1000000"),
         CheckConstraint("calculation_type = 'MANUAL' OR rate > 0"),
+        CheckConstraint("length(name) BETWEEN 1 AND 80", name="ck_penalty_types_name"),
+        CheckConstraint("length(emoji) BETWEEN 1 AND 16", name="ck_penalty_types_emoji"),
+        CheckConstraint("version > 0", name="ck_penalty_types_version"),
+        Index("ix_penalty_types_order", "sort_order", "id"),
     )
 
 
@@ -135,6 +176,14 @@ class Penalty(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint("points BETWEEN 1 AND 1000000000"),
         CheckConstraint("quantity IS NULL OR quantity BETWEEN 1 AND 10000"),
+        CheckConstraint("version > 0", name="ck_penalties_version"),
+        CheckConstraint("length(name_snapshot) BETWEEN 1 AND 80", name="ck_penalties_name"),
+        CheckConstraint("rate_snapshot BETWEEN 0 AND 1000000", name="ck_penalties_rate"),
+        CheckConstraint(
+            "(calculation_type_snapshot = 'PER_MINUTE' AND quantity IS NOT NULL AND rate_snapshot > 0 AND points::bigint = quantity::bigint * rate_snapshot) OR (calculation_type_snapshot = 'FIXED' AND quantity IS NULL AND rate_snapshot > 0 AND points = rate_snapshot) OR (calculation_type_snapshot = 'MANUAL' AND quantity IS NULL)",
+            name="ck_penalties_calculation",
+        ),
+        Index("ix_penalties_live_id", "id", postgresql_where=text("deleted_at IS NULL")),
         Index("ix_penalties_target_created", "target_user_id", "created_at"),
     )
 
@@ -164,6 +213,12 @@ class ScoreEvent(Base):
     __table_args__ = (
         CheckConstraint("category IN ('task','penalty')"),
         Index("ix_score_user_effective", "user_id", "effective_at"),
+        Index(
+            "ix_score_effective_user",
+            "effective_at",
+            "user_id",
+            postgresql_include=["category", "points"],
+        ),
     )
 
 
@@ -198,8 +253,17 @@ class Notification(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(40))
     __table_args__ = (
         Index("ix_notifications_due", "status", "available_at"),
+        Index(
+            "ix_notifications_sending_claimed",
+            "claimed_at",
+            postgresql_where=text("status = 'sending'"),
+        ),
         Index(
             "uq_rating_pending",
             "recipient_user_id",
