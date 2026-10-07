@@ -39,7 +39,14 @@ async def online() -> None:
         url.set(drivername="postgresql+asyncpg", query=query),
         poolclass=NullPool,
         hide_parameters=True,
-        connect_args={"timeout": 15, "command_timeout": 60, "statement_cache_size": 0},
+        connect_args={
+            "timeout": 15,
+            "command_timeout": 60,
+            "statement_cache_size": 0,
+            # Reflect taskflow explicitly even when a same-named login makes
+            # PostgreSQL's default "$user" search path resolve to that schema.
+            "server_settings": {"search_path": "public"},
+        },
     )
     async with engine.connect() as connection:
         # Session advisory lock remains held through Alembic's transaction commits.

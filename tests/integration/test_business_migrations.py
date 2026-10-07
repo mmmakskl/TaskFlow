@@ -4,6 +4,7 @@ import sys
 
 import pytest
 from sqlalchemy import func, select, text
+from sqlalchemy.engine import make_url
 
 from app.models import AuditEvent, Penalty, PenaltyType, ScoreEvent, Task
 from app.repositories.tasks import TaskRepository
@@ -140,3 +141,21 @@ async def test_initial_revision_refuses_destructive_downgrade(factory, settings)
         assert await session.scalar(text("SELECT to_regclass('taskflow.tasks')")) is not None
     code, output = await alembic(settings, "upgrade", "head")
     assert code == 0, output
+
+
+async def test_migration_reflection_with_application_schema_first(factory, settings):
+    # PostgreSQL's default "$user", public search_path exposes this with the
+    # local Compose role named taskflow. Reproduce it for any disposable test role.
+    name = make_url(settings.database_url.get_secret_value()).database
+    assert name and name.endswith("_test")
+    async with factory() as session:
+        bind = session.get_bind()
+        quoted = bind.dialect.identifier_preparer.quote(name)
+    async with factory.begin() as session:
+        await session.execute(text(f"ALTER DATABASE {quoted} SET search_path TO taskflow, public"))
+    try:
+        code, output = await alembic(settings, "check")
+        assert code == 0, output
+    finally:
+        async with factory.begin() as session:
+            await session.execute(text(f"ALTER DATABASE {quoted} RESET search_path"))
