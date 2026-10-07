@@ -7,6 +7,7 @@ from app.repositories.tasks import TaskRepository
 from app.services.base import AuthorizedService
 from app.services.rules import (
     DomainError,
+    StaleAction,
     estimated_minutes,
     operation_key,
     rating_points,
@@ -82,7 +83,9 @@ class TaskService(AuthorizedService):
         actor = await self.actor(actor)
         points = rating_points(points)
         task = await self.repo.get(Task, task_id, lock=True)
-        if task.deleted_at or task.evaluator_user_id != actor.id or task.owner_user_id == actor.id:
+        if task.deleted_at:
+            raise StaleAction()
+        if task.evaluator_user_id != actor.id or task.owner_user_id == actor.id:
             raise DomainError("Свою задачу оценивать нельзя.")
         self.repo.version(task, version)
         if task.status != "BACKLOG" or task.rated_points is not None:

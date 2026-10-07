@@ -30,7 +30,7 @@ class TaskRepository(Repository):
         return list(rows), count
 
     async def pending_next(self, actor: User, after_id: int = 0) -> tuple[Task | None, int]:
-        if type(after_id) is not int or after_id < 0:
+        if type(after_id) is not int or not 0 <= after_id <= 2147483647:
             raise DomainError("Недопустимая позиция списка.")
         conditions = (
             Task.evaluator_user_id == actor.id,

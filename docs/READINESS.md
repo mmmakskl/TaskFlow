@@ -1,5 +1,15 @@
 # Production readiness evidence
 
+## Latest release gate — independent QA, 2026-10-07
+
+**Not production ready:** the audited new release still requires its Render rollout, live Telegram
+webhook delivery and persistence check after actual redeploy. See [QA_REPORT.md](QA_REPORT.md) for
+six reproduced/fixed findings, the scenario matrix and remaining risks. The final frozen Docker
+suite passed **423 tests**, coverage 74%, lint/types and dependency audit. Thirty-six new independent
+cases passed against PostgreSQL 17; actual isolated PostgreSQL restart and application-container
+replacement preserved eleven tasks and the rating cooldown. Older evidence below is historical and
+does not establish acceptance of this new release.
+
 ## Verified before deployment
 
 - Private GitHub repository: `mmmakskl/TaskFlow`.

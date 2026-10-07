@@ -20,6 +20,7 @@ from app.db.seed import seed
 from app.db.session import database
 from app.models import Inbox
 from app.notifications.worker import run_workers
+from app.web.validation import validate_payload
 from app.web.webhook import configure_webhook
 
 logger = logging.getLogger(__name__)
@@ -94,8 +95,9 @@ def create_app(
         ):
             raise HTTPException(503, "Not ready")
         try:
-            async with factory() as session:
-                await session.execute(text("SELECT 1"))
+            async with asyncio.timeout(5):
+                async with factory() as session:
+                    await session.execute(text("SELECT 1"))
         except Exception:
             logger.exception("readiness_database_failed")
             raise HTTPException(503, "Database unavailable") from None
@@ -119,8 +121,15 @@ def create_app(
                 raise HTTPException(413, "Update too large")
         try:
             payload: dict[str, Any] = json.loads(body)
+            validate_payload(payload)
+            if (
+                not isinstance(payload, dict)
+                or type(payload.get("update_id")) is not int
+                or not -(2**63) <= payload["update_id"] < 2**63
+            ):
+                raise ValueError("Invalid update ID")
             update = Update.model_validate(payload)
-        except (ValueError, TypeError, ValidationError):
+        except (ValueError, TypeError, ValidationError, RecursionError):
             raise HTTPException(400, "Invalid Telegram update") from None
         async with factory.begin() as session:
             await session.execute(

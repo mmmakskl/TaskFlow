@@ -14,7 +14,7 @@ class Repository:
         self.session = session
 
     async def get(self, model: type[Entity], entity_id: int, lock: bool = False) -> Entity:
-        if type(entity_id) is not int or entity_id < 1:
+        if type(entity_id) is not int or not 1 <= entity_id <= 2147483647:
             raise StaleAction()
         query = select(model).where(model.id == entity_id)  # type: ignore[attr-defined]
         if lock:

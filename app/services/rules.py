@@ -1,3 +1,6 @@
+from app.utils.text import postgres_text
+
+
 class DomainError(Exception):
     """Safe, user-facing domain validation failure."""
 
@@ -59,6 +62,8 @@ def text_field(value: str, maximum: int, label: str) -> str:
     if not isinstance(value, str):
         raise DomainError(f"{label}: введи текст.")
     value = value.strip()
+    if not postgres_text(value):
+        raise DomainError(f"{label}: текст содержит недопустимые символы.")
     if not 1 <= len(value) <= maximum:
         raise DomainError(f"{label}: от 1 до {maximum} символов.")
     return value
@@ -90,6 +95,11 @@ def authenticated_identity(
 
 
 def operation_key(value: object) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value) > 80:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 80
+        or not postgres_text(value)
+    ):
         raise DomainError("Недопустимый идентификатор операции.")
     return value
