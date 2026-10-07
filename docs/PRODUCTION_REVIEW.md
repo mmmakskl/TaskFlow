@@ -43,14 +43,14 @@ Fresh verification for application commit `576f08a`:
 | App restart / persistence | PASS: ten service-created tasks retained, Alembic 0004 retained |
 | Webhook transport | PASS locally: missing secret 403, malformed input 400, signed duplicate 200 with one processed inbox row |
 | Secret scan | PASS: configured production credentials absent from tracked files and reachable Git patches |
-| Real Render release / redeploy | PENDING: old live commit d2e4cee, revision 0002; new release requires rollout |
+| Real Render release | PASS: d783f1d Live, revision 0004; first-deploy business fingerprints unchanged |
 | Real two-account Telegram acceptance | PENDING: previously deferred by user; not inferred from mocked transport |
 
 Local evidence: `/private/tmp/taskflow-review-final-check.log`,
 `/private/tmp/taskflow-review-final-docker.log`, `/private/tmp/taskflow-review-production-build.log`.
 Production backups/receipts are mode 0600 outside Git. Do not publish their contents.
 
-GitHub CI passed for application commit 576f08a. Live evidence must be updated after rollout. Do not infer new-release acceptance
+GitHub CI passed for application commit 576f08a. PR #4 runtime rollout passed; see READINESS for live receipts. Do not infer new-release acceptance
 from the older service's healthy endpoint.
 
 ## Review conclusions
@@ -85,10 +85,10 @@ real acceptance from the second account. Automated peer-flow tests do not replac
 | Automated tests | PASS | 434 release tests / 454 working-tree tests, no skips |
 | Lint / types / dependencies | PASS | Ruff, formatting, mypy and pip-audit |
 | GitHub CI | PASS | Run [37583671760](https://github.com/mmmakskl/TaskFlow/actions/runs/37583671760), application commit 576f08a |
-| New Render release deployment / logs | FAIL | Not yet deployed; UI automation blocked, API credential requested |
-| Actual Render redeploy persistence | FAIL | Only isolated production-image restart/persistence verified so far |
+| New Render release deployment / logs | PASS | d783f1d Live; migration_complete, production startup and webhook_configured observed |
+| Actual Render redeploy persistence | PASS | d783f1d redeployed; business fingerprints and old processed marker retained, new duplicate marker processed once |
 | Genuine new-release Telegram smoke | FAIL | Web client cannot be controlled reliably; no fabricated sender updates used |
 
-No known unresolved blocker/high-severity code defect was found in the reviewed paths. The release
-remains unaccepted until the live FAIL gates above are closed. Real Vika rating → Max completion
+No known unresolved blocker/high-severity code defect was found in the reviewed paths. Runtime
+deployment and redeploy gates now pass. Genuine Telegram acceptance remains open. Real Vika rating → Max completion
 acceptance was previously deferred and still requires the second authorized account.

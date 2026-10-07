@@ -1,5 +1,24 @@
 # Production readiness evidence
 
+## Live rollout — 2026-10-07
+
+Runtime release `d783f1da1cfe5f7c22681d33e893cc375b86a7f8` (PR #4) is deployed on
+Render Free. Deployment `dep-db2ut5d9fdbs739ctq50` reached Live at 07:04:07 UTC.
+Logs show migrations 0002 → 0003 → 0004, production startup and `webhook_configured`.
+Health/ready return 200; wrong-secret rejection and signed duplicate inbox processing pass.
+Telegram reports the expected webhook, zero pending updates and no last delivery error.
+Business fingerprints match the pre-upgrade baseline: six tasks, two penalties, seven penalty
+types, sixteen audit events and four score events. A private backup was taken before maintenance.
+
+Same-code redeploy `dep-db2uu92d0e5s73ehknu0` also reached Live. The second receipt confirms
+identical business fingerprints, retention of the first processed webhook marker, and successful
+processing of a new duplicate marker. Health/ready remain 200, revision is 0004 and Telegram reports
+zero pending updates/no last error. Auto-deploy is restored to **After CI Checks Pass**.
+Private receipts/backups are in `~/.local/share/taskflow/deployment/2026-10-07/live-rollout/`.
+
+Genuine new-release two-account Telegram acceptance remains deferred; synthetic transport probes
+do not impersonate either user. Earlier closed-rollout sections below are historical.
+
 ## Fresh final review
 
 See [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md) for the fresh code-first audit, three additional

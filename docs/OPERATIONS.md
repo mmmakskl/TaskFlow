@@ -19,7 +19,7 @@ Use Render Events to inspect build/deploy failures, and Logs for migration, data
 3. Inspect Render Logs for `migration_complete`, `webhook_configured`, `update_failed`,
    `update_dead_letter`, `notification_delivery` and worker/DB failures. Use IDs to correlate events.
 4. Check [QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md) before declaring recovery.
-   The new audited release is not yet live-accepted; the old endpoint alone cannot close that gate.
+   Runtime deployment is verified; genuine two-account acceptance remains separately documented.
 
 The Free service may need a cold start; health does not prove delivery. Do not enable polling,
 clear pending updates, change access IDs or replay uncertain notifications as a troubleshooting shortcut.

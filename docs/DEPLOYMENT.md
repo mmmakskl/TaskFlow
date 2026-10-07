@@ -4,8 +4,8 @@
 
 This is the deployment runbook, not a claim that the audited release is live. Check
 [QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md) for dated evidence and remaining gates.
-The existing service's auto-deploy is temporarily Off for the first incompatible consumer upgrade;
-`render.yaml` describes the desired checks-pass setting after that maintenance window.
+The first incompatible consumer upgrade has completed. Use the maintenance procedure below
+when upgrading another legacy installation; normal releases use checks-pass auto-deploy.
 
 You need GitHub repository/admin access, Render and Supabase accounts, a BotFather token and the two
 Telegram numeric IDs. For a new product, create a separate bot; never point an existing production

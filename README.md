@@ -5,10 +5,10 @@ complete it, and track weekly points minus penalties. The Russian interface uses
 compact screens, a calendar and five-item lists. Task estimates, deadlines and comments are optional.
 Forms and all business data persist in PostgreSQL.
 
-**Release status:** local QA passed; the audited release still needs Render rollout and real
-Telegram/redeploy acceptance. See [fresh review](docs/PRODUCTION_REVIEW.md), [QA report](docs/QA_REPORT.md) and
-[release evidence](docs/READINESS.md).
-A healthy older deployment is not evidence that the new release is verified.
+**Release status:** the audited application is deployed on Render with schema 0004. Health,
+readiness, signed webhook processing and migration persistence pass. Real two-account Telegram
+acceptance remains deferred. See [fresh review](docs/PRODUCTION_REVIEW.md),
+[QA report](docs/QA_REPORT.md) and [release evidence](docs/READINESS.md).
 
 ## Architecture and repository map
 
