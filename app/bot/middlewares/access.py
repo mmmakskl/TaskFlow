@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
@@ -49,10 +50,15 @@ class AccessMiddleware(BaseMiddleware):
             or chat.id != sender.id
         ):
             text = "🔒 Это приватный бот.\nДоступ к нему ограничен."
-            if isinstance(event, CallbackQuery):
-                await answer_callback(event, text, show_alert=True)
-            elif isinstance(event, Message):
-                await event.answer(text)
+            try:
+                if isinstance(event, CallbackQuery):
+                    await answer_callback(event, text, show_alert=True)
+                elif isinstance(event, Message):
+                    await event.answer(text)
+            except (TelegramAPIError, TelegramNetworkError):
+                # A denied sender can block the bot immediately after messaging it.
+                # Never retry that courtesy reply ahead of authorized users' work.
+                logger.debug("access_denial_delivery_failed")
             return None
         session = data["session"]
         repo = Repository(session)

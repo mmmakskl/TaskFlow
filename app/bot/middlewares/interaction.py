@@ -96,7 +96,13 @@ REQUIRED = {
 def draft_valid(current: str | None, data: dict[str, Any]) -> bool:
     if current is None:
         return True
-    if current not in KNOWN_STATES or type(data.get("flow")) is not int or not data.get("key"):
+    flow = data.get("flow")
+    if (
+        current not in KNOWN_STATES
+        or type(flow) is not int
+        or not 1 <= flow <= 2147483647
+        or not data.get("key")
+    ):
         return False
     needed = REQUIRED.get(current, set())
     if current.startswith("TaskForm:") and current != TaskForm.title.state:
@@ -127,7 +133,9 @@ def draft_valid(current: str | None, data: dict[str, Any]) -> bool:
         return False
     if data.get("deadline"):
         try:
-            datetime.fromisoformat(data["deadline"])
+            deadline = datetime.fromisoformat(data["deadline"])
+            if deadline.tzinfo is None or deadline.utcoffset() is None:
+                return False
         except (TypeError, ValueError):
             return False
     return True
