@@ -1,5 +1,19 @@
 # Independent QA / SRE release audit
 
+## Current release status — 2026-10-07
+
+The collaborative/deadline release is deployed on Render as commit
+`7cce3d1141c809e71b2895ced38dd50ff9f426df` (PR #5). CI run `37643282880` passed. Render deployment
+`dep-db36cjfavr4c739u9ut0` reached Live, applied Alembic `0005`, registered the Telegram webhook,
+and processed updates. Public `/health` and `/ready` returned 200 after rollout. Auto-Deploy is
+restored to After CI Checks Pass. Prior local and Docker verification: **689 passed**, zero skips;
+Ruff, mypy and dependency audit passed. See [READINESS.md](READINESS.md) for the live evidence.
+
+Full production acceptance remains open: a post-deploy authenticated business fingerprint and
+Telegram webhook-info receipt were not captured, and genuine two-account rating/completion/reopen
+testing with Vika remains deferred. Automated two-user database/handler tests and the synthetic
+mobile UI inspection do not replace those checks.
+
 ## Collaborative extension — 2026-10-07
 
 This workspace adds collaborative tasks, shared awards, suggested/rerated prices, templates and
