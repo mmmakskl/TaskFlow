@@ -39,6 +39,7 @@ async def online() -> None:
         url.set(drivername="postgresql+asyncpg", query=query),
         poolclass=NullPool,
         hide_parameters=True,
+        connect_args={"timeout": 15, "command_timeout": 60, "statement_cache_size": 0},
     )
     async with engine.connect() as connection:
         # Session advisory lock remains held through Alembic's transaction commits.

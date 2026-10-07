@@ -20,6 +20,7 @@ from app.db.seed import seed
 from app.db.session import database
 from app.models import Inbox
 from app.notifications.worker import run_workers
+from app.web.webhook import configure_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -40,24 +41,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
-        logger.info("startup environment=%s", settings.environment)
-        async with factory.begin() as session:
-            await session.execute(text("SELECT pg_advisory_xact_lock(78421311)"))
-            await seed(session, settings)
-        if settings.register_webhook:
-            await telegram.set_webhook(
-                url=f"{settings.webhook_base_url.rstrip('/')}/telegram/webhook",
-                secret_token=settings.webhook_secret.get_secret_value(),
-                allowed_updates=["message", "callback_query"],
-                drop_pending_updates=False,
-            )
-        app.state.ready = True
-        task = (
-            asyncio.create_task(run_workers(factory, dp, telegram, settings, stop))
-            if workers
-            else None
-        )
+        task = None
         try:
+            logger.info("startup environment=%s", settings.environment)
+            async with factory.begin() as session:
+                await session.execute(text("SELECT pg_advisory_xact_lock(78421311)"))
+                await seed(session, settings)
+            if settings.register_webhook:
+                await configure_webhook(telegram, settings)
+            task = (
+                asyncio.create_task(run_workers(factory, dp, telegram, settings, stop))
+                if workers
+                else None
+            )
+            app.state.worker_task = task
+            app.state.ready = True
             yield
         finally:
             app.state.ready = False
@@ -68,14 +66,22 @@ def create_app(
                 except TimeoutError:
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
-            # Never delete webhook on shutdown: an old Render instance may stop after a new one starts.
-            await dp.storage.close()
-            await telegram.session.close()
-            await engine.dispose()
+                except Exception:
+                    logger.exception("worker_shutdown_failed")
+            # Old Render replicas must never clear the new replica's webhook.
+            cleanup = await asyncio.gather(
+                dp.storage.close(),
+                telegram.session.close(),
+                engine.dispose(),
+                return_exceptions=True,
+            )
+            if any(isinstance(result, BaseException) for result in cleanup):
+                logger.error("shutdown_cleanup_failed")
             logger.info("shutdown")
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ready = False
+    app.state.worker_task = None
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -83,7 +89,9 @@ def create_app(
 
     @app.get("/ready")
     async def ready() -> dict[str, str]:
-        if not app.state.ready:
+        if not app.state.ready or (
+            app.state.worker_task is not None and app.state.worker_task.done()
+        ):
             raise HTTPException(503, "Not ready")
         try:
             async with factory() as session:
@@ -96,9 +104,13 @@ def create_app(
     @app.post("/telegram/webhook")
     async def webhook(request: Request) -> dict[str, bool]:
         header = request.headers.get("x-telegram-bot-api-secret-token", "")
-        if not secrets.compare_digest(header, settings.webhook_secret.get_secret_value()):
+        if not secrets.compare_digest(
+            header.encode("utf-8"), settings.webhook_secret.get_secret_value().encode("ascii")
+        ):
             raise HTTPException(403, "Forbidden")
-        if not app.state.ready:
+        if not app.state.ready or (
+            app.state.worker_task is not None and app.state.worker_task.done()
+        ):
             raise HTTPException(503, "Not ready")
         body = bytearray()
         async for chunk in request.stream():

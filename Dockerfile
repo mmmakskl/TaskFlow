@@ -24,4 +24,5 @@ COPY --chown=taskflow:taskflow alembic alembic
 COPY --chown=taskflow:taskflow alembic.ini .
 USER taskflow
 EXPOSE 10000
-CMD ["sh", "-c", "python -m app.db.migrate && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --no-access-log"]
+STOPSIGNAL SIGTERM
+CMD ["python", "-m", "app.startup"]

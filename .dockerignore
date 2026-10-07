@@ -12,3 +12,8 @@ __pycache__
 htmlcov
 .superpowers
 .DS_Store
+*.env
+*.dump
+*.backup
+*.log
+!.env.example
