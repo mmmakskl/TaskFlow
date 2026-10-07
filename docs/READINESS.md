@@ -1,6 +1,28 @@
 # Production readiness evidence
 
-## Collaborative/deadline rollout attempt — 2026-10-07
+## Collaborative/deadline production release — 2026-10-07
+
+PR [#5](https://github.com/mmmakskl/TaskFlow/pull/5) merged as
+`7cce3d1141c809e71b2895ced38dd50ff9f426df`. GitHub Actions run `37643282880` passed the full CI
+workflow. Render deployment `dep-db36cjfavr4c739u9ut0` reached **Deploy succeeded | Live** on that
+exact commit. Startup logs confirm migration `0004 → 0005`, `migration_complete`,
+`webhook_configured`, application startup and processed Telegram updates. Public `/health` and
+`/ready` both returned `{"status":"ok"}` and `{"status":"ready"}` after deployment.
+
+Auto-Deploy is restored to **After CI Checks Pass**. Render cannot trigger a deployment while a
+service is suspended; after the user approved the required short overlap, the prior instance was
+resumed and the exact merged commit was manually deployed. No collaborative task or penalty was
+created by the deployment checks.
+
+The pre-deploy backup was restored and upgraded `0004 → 0005` in isolated PostgreSQL 17; original
+business-data fingerprints matched before upgrade. The deploy verified database readiness and
+successful Telegram webhook registration/delivery from logs. A separate post-deploy authenticated
+business-fingerprint receipt, Telegram `getWebhookInfo` snapshot, and genuine two-account acceptance
+were not captured in this workspace; complete those checks before claiming full product acceptance.
+The 390 px Safari synthetic-fixture review and 689-test native/Docker runs are recorded below and in
+[QA_REPORT.md](QA_REPORT.md).
+
+## Collaborative/deadline publication attempts — historical
 
 Runtime candidate `a093870ba1f57535d2466f5e528a1d741923d998` is committed locally on
 `feat/collaborative-deadlines`. Native and isolated Docker gates each passed 689 tests with zero
@@ -8,11 +30,12 @@ skips; Docker coverage 72%, Ruff 113 files/mypy 71 modules and runtime dependenc
 The local 390 px Safari harness was visually inspected through peer overdue lists, late-completion
 cards and confirmed manual penalty creation using only synthetic fixtures.
 
-**Publication/deployment blocked by GitHub HTTP 500.** Repeated SSH and HTTPS pushes were
+At this earlier checkpoint, publication/deployment was blocked by GitHub HTTP 500. Repeated SSH and HTTPS pushes were
 rejected with `remote: Internal Server Error`; GitHub blob/contents API uploads also returned
 HTTP 500 with empty bodies. The remote feature branch was created at the previous main commit,
 but the runtime candidate was not published. PR/CI and a new Render deployment therefore did
-not run. Production remains the previous `aad58fc`/schema 0004 release.
+not run at that checkpoint. This was resolved later by PR #5 and the production release recorded
+above.
 
 Render Auto-Deploy was temporarily set Off for the intended incompatible upgrade, then restored
 and visually verified as After CI Checks Pass when publication remained blocked. The old service
@@ -22,8 +45,8 @@ A new private backup was restored into isolated PostgreSQL 17 and upgraded 0004 
 columns of 55 tasks, 2 penalties, 7 penalty types, 81 audit events, 4 score events and 2 users matched
 their pre-upgrade fingerprints. Backup, projection receipt and deployment probes are stored
 privately under `~/.local/share/taskflow/deployment/2026-10-07/collaborative-deadlines/`.
-The candidate can be pushed and deployed with the documented maintenance sequence once GitHub
-content writes recover. New-release native Telegram/two-account acceptance remains unverified.
+The candidate was later pushed, merged and deployed. New-release native Telegram/two-account
+acceptance remains unverified.
 
 ## Live rollout — 2026-10-07
 
