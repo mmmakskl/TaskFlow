@@ -1,50 +1,88 @@
 # Testing
 
-Notification-specific PostgreSQL coverage: `pytest tests/integration/test_notifications.py` checks
-ten-task batching, concurrent claims/creation, duplicate operation keys, cooldown after a fresh
-engine restart, deferred delivery, empty queues, snapshots, safe failures, rate-limit retries,
-FK-lock compatibility and migration 0004 roundtrip. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
+## Safe environment setup
 
-Run `make lint`, `make typecheck` and `make test`. Unit tests need no external services. Integration tests require a dedicated PostgreSQL database whose name ends in `_test`; set TEST_DATABASE_URL. The fixture drops its application schema and Alembic revision table before each test, migrates from empty and seeds real data. Never reuse production or a shared development database.
+Use Python 3.12+ and a disposable real PostgreSQL database. Follow README first, then:
 
-`docker build --target test -t taskflow:test .` starts PostgreSQL inside the isolated test build stage and runs the complete suite on Python 3.12. `make docker` builds the smaller non-root production image. GitHub Actions additionally exercises PostgreSQL 16 and dependency auditing.
+```sh
+docker compose up -d db
+# Once per new local volume; an existing database needs no recreation:
+docker compose exec -T db createdb -U taskflow taskflow_test
+export TEST_DATABASE_URL=postgresql://taskflow:local-development-only@localhost:5432/taskflow_test
+make lint
+make typecheck
+make test
+make check
+```
 
-## Coverage
+The fixture reads `TEST_DATABASE_URL` from the **shell**, not `.env`. It drops `taskflow` and
+`public.alembic_version`, migrates from empty and seeds before each DB-dependent test. The database
+name must end in `_test`. Never run tests against production, a shared DB or the local application's
+`taskflow` database. DB-dependent tests skip without the variable; report skips separately.
+The DB role must own the disposable database for migration/search-path checks. Tests are sequential;
+do not run parallel pytest processes against one database.
 
-- Pure rules: rating bounds/permissions, transition confirmations, all penalty methods, negative progress and exact cooldown boundary.
-- Time: timezone-aware week boundaries, Monday alignment and daylight-saving 167/169-hour weeks.
-- Repositories/services: empty migrations, peer creation/rating/completion, awarded and penalty snapshots, rate changes, reopen reversal, immutable event triggers, idempotent seed, concurrent completion/penalty creation and concurrent notification claims.
-- Telegram: actual aiogram dispatch with mocked HTTP Bot API, durable inbox, one edited UI per user, duplicate and stale callbacks, optional fields, confirmations and unauthorized users.
-- Mobile forms: back traversal, preserved drafts, minute/timezone/target presets, invalid input with retained buttons, stale confirmation rejection, optional effort edits/removal and populated-schema migration.
-- HTTP: health/readiness, secret rejection, duplicate update IDs, invalid bodies and size limits.
-- Recovery: unexpected handler rollback/retry with one safe notification; SQL error privacy; history timezone aggregation and bounded pagination.
+Unit tests use pytest/pytest-asyncio without external services. PostgreSQL tests use SQLAlchemy async
+and real constraints/locks, with mocked Bot API transport where handlers are involved. A fake Telegram
+token in tests does not verify live Telegram delivery. Business tests use `_env_file=None` settings.
 
-There is no arbitrary percentage gate; required business flows and regression cases are the gate. Coverage reports show which UI branches need further tests. Mocked Telegram tests do not substitute for real production chat acceptance.
+## Commands and suites
 
-## Required production evidence
+| Command | Purpose |
+| --- | --- |
+| `make test-business-unit` | Isolated service/rule gate, no Telegram or PostgreSQL |
+| `make test-business` | Unit gate + real business repository/service/migration checks; requires exported URL |
+| `make test-ux` | Focused dispatcher, forms and navigation; requires exported URL |
+| `make test` | Entire pytest suite; inspect skips |
+| `venv/bin/python -m pytest -q tests/unit` | Unit-only run |
+| `venv/bin/python -m pytest -q --cov=app --cov-report=term-missing` | Full suite and line coverage report |
+| `make lint`, `make typecheck` | Ruff lint/format check and mypy application checks |
+| `make check` | Lint, types and tests |
+| `docker build --target test -t taskflow:test .` | Isolated Python 3.12/PostgreSQL 15 build-stage full gate |
+| `make docker` | Non-root production image build; does not run tests |
 
-Health/readiness, valid registered webhook, real /start and task creation, peer rating, completion score, penalty snapshot/config change and confirmed reopening. Redeploy and verify persistent records. Record exact commands, counts and external outcomes in READINESS.md; skipped integration tests must never be reported as passed.
+GitHub Actions uses PostgreSQL 16, Python 3.12, lint, types, business unit gate, full suite, runtime
+`pip-audit` and production Docker build. There is no configured minimum coverage percentage;
+required invariants, flow coverage and regression tests are the gate. See [QA_REPORT.md](QA_REPORT.md)
+for dated counts rather than assuming a historical count is current.
 
-## Foundation gate
+## What to test when changing behavior
 
-`make test-business-unit` runs isolated business services/rules with in-memory repository substitutes,
-without Telegram or PostgreSQL. `TEST_DATABASE_URL=... make test-business` then runs real PostgreSQL
-service/repository/migration checks; it fails when the database variable is missing. No mocked lock
-behavior is treated as concurrency evidence. See [BUSINESS.md](BUSINESS.md) for transaction ownership.
+- **Tasks/scoring:** owner/evaluator binding, rating bounds, all transitions, confirmed reopen,
+  awarded snapshot, completion-week membership, negative/exact/over-target results.
+- **Time:** shared scoring versus personal display timezone, Monday/end-exclusive bounds, DST,
+  tasks created and completed in different weeks, original-week compensation.
+- **Penalties/settings:** three methods, immutable snapshots, type edits during preview,
+  soft-delete compensation, stale versions and duplicate confirmation.
+- **Transactions:** concurrent completion/creation/claim winners, partial-failure rollback,
+  stale identity-map refresh, operation keys and immutable-event triggers.
+- **Notifications:** ten-task coalescing, recipient locks, 60-minute cooldown, persistent restart,
+  empty queues, deferred batches, explicit retry_after and ambiguous send handling.
+- **Telegram:** dispatcher/FSM with mocked transport, Back/skips/presets, interrupted draft,
+  `/menu` mid-form, old buttons, unexpected text/media, missing menu and transport failures.
+- **Web/security:** health/ready and DB hang, worker failure, wrong/non-ASCII secret, malformed,
+  huge/deep JSON and out-of-range IDs, unauthorized/group access, escaped text and redacted errors.
 
-The gate includes the full state/confirmation matrix, identity binding, rating bounds, award snapshots,
-original-week reversals, all penalty methods, stale/tampered previews, configuration rollback, injected
-mid-operation failures, shared-zone/DST boundaries and negative scores. PostgreSQL tests also assert
-concurrent mutation winners, immutable snapshots/events, query indexes, bounded pagination, metadata
-drift, clean migration startup and concurrent migrators. Revision 0003 downgrade/upgrade compares all
-persisted business rows; destructive downgrades and invalid legacy upgrades must fail atomically.
+Add a regression that fails for a reproduced bug, then verify the fix. Relevant focused suites include
+`test_business_*`, `test_services.py`, `test_notifications.py`, `test_mobile_ux.py`,
+`test_form_navigation.py`, `test_web_and_bot.py`, `test_production_lifecycle.py`,
+`test_qa_adversarial.py` and `test_qa_inputs.py`.
 
-## Mobile interaction regression
+## Migration gates
 
-`tests/integration/test_mobile_ux.py` covers fast creation, direct optional input, rating queue order,
-retained filter/page context, expired/cancelled confirmations, interrupted FSM, unexpected commands
-and media, malformed callbacks, deleted menu replacement, long HTML-safe content, one-tap enabling
-and clearing optional fields. Unit tests isolate renderer/interaction guards. Run these together with
-existing handler tests and the business gate. Optional deleteMessage network failures are injected
-to prove chat cleanup cannot roll back saved data. Manual evidence is recorded separately in
-[UX_ACCEPTANCE.md](UX_ACCEPTANCE.md).
+`test_business_migrations.py` and `test_business_foundation.py` cover empty/populated upgrade,
+concurrent migrators, guards/indexes/metadata drift and safe 0003 roundtrip. Notification tests cover
+0004 roundtrip and legacy in-flight behavior. Destructive 0001/0002 downgrades must refuse.
+Run migration experiments only on disposable copies. Autogenerate a revision in development,
+review SQL/triggers/backfill, then execute full PostgreSQL tests before deploy.
+
+## Manual acceptance and production evidence
+
+[UX_ACCEPTANCE.md](UX_ACCEPTANCE.md) gives the mobile checklist. Both real accounts must pass
+create → peer rate → complete → reopen, penalty creation/config change/snapshot and stale-button
+recovery. Inspect actual Telegram rendering and taps; a browser preview is not phone evidence.
+
+[DEPLOYMENT.md](DEPLOYMENT.md) provides hardened container and live probes. Verify revision head,
+health/readiness, secret rejection, actual Telegram update delivery and persistent data after a real
+Render redeploy. Record exact commit, commands, counts and outcomes in [READINESS.md](READINESS.md).
+Never describe mocked tests, skipped integration or an old deployment as live acceptance.

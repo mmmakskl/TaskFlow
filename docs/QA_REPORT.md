@@ -118,3 +118,58 @@ See [deployment](DEPLOYMENT.md) for the exact hardened container and live probe 
 6. Credential scan covers current known credentials and reachable Git history, not deleted remote
    refs, provider logs, unknown credentials or third-party backups. Existing local secret exports
    remain private outside Git for the pending deployment; remove them after completion.
+
+
+## Documentation and clean-onboarding verification — 2026-10-07
+
+README, AGENTS and PRODUCT/ARCHITECTURE/DATA_MODEL/DEPLOYMENT/OPERATIONS/TESTING were reconciled
+with the implemented handlers, services, repositories, model constraints and Alembic head 0004.
+Historical discovery/proposal claims in the architecture/product guides were replaced with current
+behavior. All relative link targets in the nine handoff documents resolve. AGENTS includes an
+operational DO NOT section and preserves scoring/access/migration/idempotency invariants.
+
+### Additional finding QA-007 (Medium)
+
+A fresh README setup with Compose's login named `taskflow` caused two existing migration tests to
+fail. PostgreSQL's default `"$user", public` search path selected the application schema as the
+connection's default; Alembic reflection then reported every application table as missing. This also
+made autogeneration propose duplicate table creation. A new regression setting the disposable DB's
+search path to `taskflow, public` reproduced the failure independently.
+
+Fixed migration connections to explicitly use `search_path=public`; application DDL is still schema-
+qualified. No schema revision or business-data change is required. The new test restores the
+**disposable** database setting in finally. Applied migration files were not rewritten.
+
+### Verification scope
+
+Commands ran in a fresh temporary checkout copy with a new venv, Compose project/volume, local
+PostgreSQL 16 and fake development Bot token. No production secrets or DB were used. Compose commands
+used a separate `-p taskflow-docs` namespace to avoid existing services. The documentation pass's
+one migration-env correction and regression are distinct from the preceding 423-test audit snapshot.
+
+- `make dev`, fresh `.env`, `docker compose up -d db`, `pg_isready`, `make migrate`, `alembic current`:
+  pass; empty database reached 0004. `make start` and `make run` both started successfully.
+- Native `/health` and `/ready`: 200; unsigned webhook: 403. Startup seeded two users/seven types.
+- `make migration message="documentation workflow smoke"`: generated a disposable revision with
+  parent 0004; after the reflection fix `alembic check` reported no new operations. The disposable
+  generated revision was removed without applying it.
+- First native `make check`: **421 passed, 2 failed** (QA-007). Independent new regression: red.
+- After correction, native `make check`: **424 passed, zero skips**, Ruff lint/format and mypy pass.
+  Python 3.14/PostgreSQL 16 exercised the README's Python 3.12+ support path.
+- `make test-business-unit`: **188 passed**.
+- `make docker`, `docker compose up -d --build app`: production image/startup pass; container
+  `/health` and `/ready` return 200; graceful Compose stop succeeds. Local queue-count SQL and
+  `tools.deployment_probe --help` also pass.
+
+- `make test-business`: **188 unit + 47 PostgreSQL cases passed**.
+- Development HTTPS tunnel: `/health` and `/ready` 200, unsigned webhook 403. Default QUIC could
+  not connect in this network; the documented `--protocol http2` fallback succeeded. The tunnel
+  did not register the real bot or impersonate either user.
+- After the fix, rerunning autogeneration against the seeded local DB produced an empty upgrade,
+  with parent 0004. The disposable revision was removed without applying it.
+
+- `make test-ux`: **63 passed** against separate disposable PostgreSQL 16.
+- Final Docker test stage (Python 3.12/PostgreSQL 15): **424 passed**, zero skips, **74% coverage**;
+  Ruff, mypy and runtime dependency audit passed. This includes the new search-path regression. Real BotFather credential entry, real two-user Telegram acceptance, new-release
+Render deployment and actual Render redeploy persistence remain the existing external acceptance gates.
+This documentation pass does not close the release decision above.

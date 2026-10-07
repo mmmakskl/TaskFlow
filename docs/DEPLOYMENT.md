@@ -1,5 +1,17 @@
 # Production deployment
 
+## Release gate and prerequisites
+
+This is the deployment runbook, not a claim that the audited release is live. Check
+[QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md) for dated evidence and remaining gates.
+The existing service's auto-deploy is temporarily Off for the first incompatible consumer upgrade;
+`render.yaml` describes the desired checks-pass setting after that maintenance window.
+
+You need GitHub repository/admin access, Render and Supabase accounts, a BotFather token and the two
+Telegram numeric IDs. For a new product, create a separate bot; never point an existing production
+bot at a development tunnel. Both users must initiate the chat. Use Python 3.12+ with
+`make dev` for the verification tool. Keep exported provider ENV/backup files outside Git, mode 0600.
+
 ## Current target
 
 - Private source: `https://github.com/mmmakskl/TaskFlow`, branch `main`.
@@ -31,7 +43,8 @@ uses SQLite or the Render filesystem. URL-encode reserved password characters; e
 
 ## 2. Render service and environment
 
-Create a Docker Web Service from the private repository (or apply `render.yaml`). Use branch `main`,
+In Render, authorize GitHub access to the private repository. Choose New → Blueprint to apply
+`render.yaml`, or New → Web Service and select that repository for manual setup. Use branch `main`,
 Dockerfile `./Dockerfile`, context `.`, health path `/ready`, and auto-deploy **After CI Checks Pass**.
 Leave Docker Command empty: the image defines startup. Free services have no pre-deploy command;
 migrations therefore run in the image startup before Uvicorn accepts traffic.
@@ -53,6 +66,14 @@ Configure these through Render Environment; never commit a production `.env`:
 | `ENVIRONMENT`, `LOG_LEVEL` | production, INFO |
 | `REGISTER_WEBHOOK` | true; production rejects false |
 | `PORT` | Supplied by Render; defaults to 10000 locally |
+
+After Render assigns the service hostname, set `WEBHOOK_BASE_URL` to that exact HTTPS origin and
+save/deploy the environment changes. Do not copy the current installation's URL for a new service.
+The Blueprint generates `WEBHOOK_SECRET`; manual setup can generate one privately:
+
+```sh
+venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
 
 Both Telegram users must open the bot and press Start before it can send them notifications.
 `REGISTER_WEBHOOK=false` is supported only for local development/tests and does not enable polling.
@@ -163,3 +184,12 @@ failure, check origin/secret, Telegram bot permissions, blocked chats and cold s
 pending Telegram updates, bulk replay uncertain notifications, log tokens or enable public debug UI.
 See [Render deploys](https://render.com/docs/deploys) and
 [Telegram webhook parameters](https://core.telegram.org/bots/api#setwebhook).
+
+
+## Evidence to hand off
+
+Record the exact source/deployed commit, CI run, Alembic revision, Live event, endpoint results,
+webhook delivery timestamps, actual two-account acceptance and before/after redeploy receipts.
+Do not record credentials or private task text. [QA_REPORT.md](QA_REPORT.md) is the audit decision;
+[READINESS.md](READINESS.md) is the chronological release evidence. Old discovery plans under
+`docs/superpowers/plans/` are historical planning notes, not the source of current deployment status.

@@ -1,5 +1,17 @@
 # Production readiness evidence
 
+## Documentation handoff verification — 2026-10-07
+
+README and all required handoff guides now describe the actual revision-0004 application.
+Clean native onboarding (Python 3.14/PostgreSQL 16) and Docker test stage
+(Python 3.12/PostgreSQL 15) each pass **424 tests**, zero skips.
+The pass exposed and fixed Alembic reflection for a login/search path named `taskflow`;
+see QA-007 and exact command evidence in [QA_REPORT.md](QA_REPORT.md).
+HTTPS development tunnel and native/Compose health/ready/unsigned-webhook checks passed.
+This is local verification, not new-release Render or real two-account Telegram acceptance.
+The production rollout gate below remains open work.
+
+
 ## Latest release gate — independent QA, 2026-10-07
 
 **Not production ready:** the audited new release still requires its Render rollout, live Telegram
