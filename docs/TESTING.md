@@ -1,5 +1,10 @@
 # Testing
 
+Notification-specific PostgreSQL coverage: `pytest tests/integration/test_notifications.py` checks
+ten-task batching, concurrent claims/creation, duplicate operation keys, cooldown after a fresh
+engine restart, deferred delivery, empty queues, snapshots, safe failures, rate-limit retries,
+FK-lock compatibility and migration 0004 roundtrip. See [NOTIFICATIONS.md](NOTIFICATIONS.md).
+
 Run `make lint`, `make typecheck` and `make test`. Unit tests need no external services. Integration tests require a dedicated PostgreSQL database whose name ends in `_test`; set TEST_DATABASE_URL. The fixture drops its application schema and Alembic revision table before each test, migrates from empty and seeds real data. Never reuse production or a shared development database.
 
 `docker build --target test -t taskflow:test .` starts PostgreSQL inside the isolated test build stage and runs the complete suite on Python 3.12. `make docker` builds the smaller non-root production image. GitHub Actions additionally exercises PostgreSQL 16 and dependency auditing.

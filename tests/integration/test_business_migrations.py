@@ -57,7 +57,7 @@ async def test_reversible_guards_preserve_all_data(factory, settings):
     assert await snapshot() == before
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0003"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
         )
     code, output = await alembic(settings, "check")
     assert code == 0, output
@@ -86,7 +86,7 @@ async def test_concurrent_empty_database_migrations(factory, settings):
         assert code == 0, output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0003"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
         )
         assert await session.scalar(select(func.count(Task.id))) == 0
         assert set(

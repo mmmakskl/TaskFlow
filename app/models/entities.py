@@ -253,8 +253,17 @@ class Notification(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(40))
     __table_args__ = (
         Index("ix_notifications_due", "status", "available_at"),
+        Index(
+            "ix_notifications_sending_claimed",
+            "claimed_at",
+            postgresql_where=text("status = 'sending'"),
+        ),
         Index(
             "uq_rating_pending",
             "recipient_user_id",

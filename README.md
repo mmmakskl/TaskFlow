@@ -82,6 +82,6 @@ Production Docker runs Alembic before Uvicorn as a non-root user. `docker compos
 - Bot silent: both users must press Start; inspect Telegram `getWebhookInfo`, Render logs and inbox failures.
 - Supabase connection failures: use IPv4-compatible **session** pooler on 5432, not transaction pooler 6543; check TLS and encoded password.
 - Stale button: reopen the list or `/menu`; old versions cannot overwrite newer data.
-- Missed notification: delivery is at most one attempt, avoiding duplicate Telegram messages after ambiguous network errors. Pending ratings remain visible in the menu.
+- Missed notification: ambiguous sends are not replayed; explicit rate-limit rejections may retry safely. Rating attempts obey a persistent 60-minute minimum cooldown. Pending ratings remain visible in the menu. See [notification delivery](docs/NOTIFICATIONS.md).
 
 See [operations](docs/OPERATIONS.md) for recovery and rollback. Production verification evidence and remaining deployment gates are recorded in [readiness](docs/READINESS.md).

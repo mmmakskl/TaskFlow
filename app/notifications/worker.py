@@ -3,18 +3,14 @@ import logging
 from datetime import timedelta
 
 from aiogram import Bot, Dispatcher
-from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.types import Update
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.bot.keyboards.common import button, keyboard
-from app.bot.render import safe
 from app.bot.storage import current_session
 from app.config.settings import Settings
 from app.models import Inbox, Notification, User
-from app.repositories.base import Repository
-from app.services.notifications import NotificationService
+from app.notifications.delivery import send_notification
 from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
@@ -99,39 +95,6 @@ async def process_update(
         return False
 
 
-async def send_notification(
-    factory: async_sessionmaker[AsyncSession], bot: Bot, settings: Settings
-) -> bool:
-    async with factory.begin() as session:
-        claimed = await NotificationService(Repository(session), settings).claim()
-    if claimed is None:
-        return False
-    notification, user, count = claimed
-    status = "sent"
-    try:
-        if notification.kind == "rating_pending":
-            message = f"⭐ <b>Есть новые задачи на оценку</b>\n\nСейчас ждут твоей оценки: {count}"
-            markup = keyboard([button("Оценить задачи", "ratings")])
-        elif notification.kind == "handler_error":
-            message = "⚠️ Не получилось выполнить действие. Попробуй ещё раз или открой меню."
-            markup = keyboard([button("🏠 Меню", "menu")])
-        else:
-            payload = notification.payload
-            message = f"⭐ {safe(payload['evaluator'])} оценила(о) задачу\n\n📝 {safe(payload['title'])}\n💰 {payload['points']} баллов\n\nЗадача добавлена в «К выполнению»."
-            markup = keyboard([button("Открыть задачу", "task", payload["task_id"])])
-        await bot.send_message(user.telegram_id, message, reply_markup=markup, parse_mode="HTML")
-    except (TelegramAPIError, TelegramNetworkError):
-        status = "failed"
-        logger.exception(
-            "notification_failed notification_id=%s recipient_id=%s", notification.id, user.id
-        )
-    async with factory.begin() as session:
-        current = await session.get(Notification, notification.id, with_for_update=True)
-        if current is not None:
-            current.status = status
-    return True
-
-
 async def run_workers(
     factory: async_sessionmaker[AsyncSession],
     dispatcher: Dispatcher,
@@ -139,11 +102,19 @@ async def run_workers(
     settings: Settings,
     stop: asyncio.Event,
 ) -> None:
+    await asyncio.gather(
+        run_updates(factory, dispatcher, bot, stop),
+        run_notifications(factory, bot, settings, stop),
+    )
+
+
+async def run_updates(
+    factory: async_sessionmaker[AsyncSession], dispatcher: Dispatcher, bot: Bot, stop: asyncio.Event
+) -> None:
     cleanup_at = utcnow()
     while not stop.is_set():
         try:
             worked = await process_update(factory, dispatcher, bot)
-            notified = await send_notification(factory, bot, settings)
             if utcnow() >= cleanup_at:
                 async with factory.begin() as session:
                     await session.execute(
@@ -152,7 +123,7 @@ async def run_workers(
                         )
                     )
                 cleanup_at = utcnow() + timedelta(hours=1)
-            if not (worked or notified):
+            if not worked:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=0.25)
                 except TimeoutError:
@@ -161,5 +132,21 @@ async def run_workers(
             logger.exception("worker_failed")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=1)
+            except TimeoutError:
+                pass
+
+
+async def run_notifications(
+    factory: async_sessionmaker[AsyncSession], bot: Bot, settings: Settings, stop: asyncio.Event
+) -> None:
+    while not stop.is_set():
+        try:
+            worked = await send_notification(factory, bot, settings)
+        except Exception:
+            logger.exception("notification_worker_failed")
+            worked = False
+        if not worked:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=0.25)
             except TimeoutError:
                 pass

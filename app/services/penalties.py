@@ -3,7 +3,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.config.settings import Settings
-from app.models import Penalty, PenaltyType, ScoreEvent, User
+from app.models import Notification, Penalty, PenaltyType, ScoreEvent, User
 from app.repositories.base import Repository
 from app.repositories.penalties import PenaltyRepository
 from app.schemas.penalties import PenaltyPreview
@@ -131,6 +131,20 @@ class PenaltyService(AuthorizedService):
             "create",
             {},
             {"points": points, "target_id": target.id, "rate": kind.rate},
+        )
+        self.repo.add(
+            Notification(
+                recipient_user_id=target.id,
+                kind="penalty_created",
+                payload={
+                    "penalty_id": penalty.id,
+                    "name": penalty.name_snapshot,
+                    "points": penalty.points,
+                    "actor": actor.display_name,
+                },
+                dedupe_key=f"penalty:{penalty.id}",
+                available_at=utcnow(),
+            )
         )
         await self.repo.flush()
         return penalty

@@ -12,7 +12,7 @@ All application tables are in the private `taskflow` PostgreSQL schema. Schema c
 | score_events | User, category, signed points, effective timestamp and unique operation key; immutable |
 | dialogs | Durable aiogram FSM state and JSONB data per bot/chat/user key |
 | telegram_updates | Unique update ID, durable payload, attempts, due time and status |
-| notifications | Recipient, kind, payload, unique dedupe key, delivery status and due time |
+| notifications | Recipient, kind, snapshot payload, unique dedupe key, status/due time, attempts, claim/finish timestamps and bounded error code |
 
 Task owner and evaluator must differ; rated_by must equal evaluator. Rated points are 1–10000. DONE requires completion time and awarded snapshot; other states have neither. The service layer enforces the allowed transition graph and actor permissions. Foreign keys retain referenced records; task cancellation and penalty deletion are non-destructive.
 

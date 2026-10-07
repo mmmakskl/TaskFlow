@@ -1,13 +1,8 @@
-from datetime import timedelta
-from uuid import uuid4
-
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
 
-from app.models import Notification, Task, User
+from app.models import Task, User
 from app.repositories.base import Repository
 from app.services.rules import DomainError
-from app.utils.time import utcnow
 
 FILTERS = {
     "active": ("BACKLOG", "TODO", "IN_PROGRESS"),
@@ -56,22 +51,6 @@ class TaskRepository(Repository):
         return await self.session.scalar(select(Task).where(Task.operation_key == key))
 
     async def enqueue_rating(self, evaluator_id: int, debounce_seconds: int) -> None:
-        # The partial unique index permits one pending batch, preserving its first debounce.
-        now = utcnow()
-        await self.session.execute(
-            insert(Notification)
-            .values(
-                recipient_user_id=evaluator_id,
-                kind="rating_pending",
-                payload={},
-                dedupe_key=f"rating:{uuid4()}",
-                status="pending",
-                available_at=now + timedelta(seconds=debounce_seconds),
-                created_at=now,
-            )
-            .on_conflict_do_nothing(
-                index_elements=[Notification.recipient_user_id],
-                index_where=(Notification.kind == "rating_pending")
-                & (Notification.status == "pending"),
-            )
-        )
+        from app.repositories.notifications import NotificationRepository
+
+        await NotificationRepository(self.session).enqueue_rating(evaluator_id, debounce_seconds)
