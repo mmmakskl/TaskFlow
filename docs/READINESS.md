@@ -1,5 +1,10 @@
 # Production readiness evidence
 
+## Fresh final review
+
+See [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md) for the fresh code-first audit, three additional
+fixes and current verification. Earlier sections below are historical checkpoints.
+
 ## Documentation handoff verification — 2026-10-07
 
 README and all required handoff guides now describe the actual revision-0004 application.

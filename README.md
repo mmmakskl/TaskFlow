@@ -6,7 +6,8 @@ compact screens, a calendar and five-item lists. Task estimates, deadlines and c
 Forms and all business data persist in PostgreSQL.
 
 **Release status:** local QA passed; the audited release still needs Render rollout and real
-Telegram/redeploy acceptance. See [QA report](docs/QA_REPORT.md) and [release evidence](docs/READINESS.md).
+Telegram/redeploy acceptance. See [fresh review](docs/PRODUCTION_REVIEW.md), [QA report](docs/QA_REPORT.md) and
+[release evidence](docs/READINESS.md).
 A healthy older deployment is not evidence that the new release is verified.
 
 ## Architecture and repository map

@@ -1,15 +1,22 @@
 # Independent QA / SRE release audit
 
+## Fresh final review
+
+See [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md) for the fresh code-first audit, three additional
+fixes and current verification. Earlier sections below are historical checkpoints.
+
 Date: 2026-10-07. Target: the `production-deployment` release and the fixes described below.
 
 ## Release decision
 
-**NOT PRODUCTION READY / rollout gate remains closed.** The local release gates pass, but the new
-release has not been deployed to Render. Browser automation returns `cgWindowNotFound`; new-release
-Render logs, real Telegram delivery, and persistence across an actual Render redeploy remain
-unverified. The older production service is still running. Auto-deploy is temporarily Off for the
-first incompatible notification-consumer upgrade; follow [DEPLOYMENT.md](DEPLOYMENT.md) before
-restoring After CI Checks Pass. Do not treat old-release health checks as new-release acceptance.
+**NOT PRODUCTION READY / live rollout gate remains closed.** Fresh code review, fixes and
+verification are in [PRODUCTION_REVIEW.md](PRODUCTION_REVIEW.md). The frozen release passes 434 tests
+and the working tree passes 454 (20 unrelated callback tests). Docker, lint, types, dependency audit,
+PostgreSQL interruption and restored-production migration round trips pass. The current Render
+service still runs old commit `d2e4cee`, revision 0002. The UI tool is stuck on Arc's attachment menu;
+Safari access was not approved. New-release Render logs, genuine Telegram delivery and actual Render
+redeploy persistence remain unverified. Auto-deploy stays Off for the first incompatible notification
+consumer upgrade. Follow [DEPLOYMENT.md](DEPLOYMENT.md), then restore After CI Checks Pass.
 
 No unresolved high-severity defect was identified in the audited application paths. This is a
 bounded audit, not proof that every possible defect has been eliminated.
