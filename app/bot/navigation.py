@@ -203,6 +203,9 @@ async def destination_screen(
     from app.bot.handlers.templates import template_details, template_list
 
     await reset(state, keep_navigation=False)
+    if action.name == "menu":
+        # A fresh menu message stays at the bottom as updates accumulate above it.
+        await state.update_data(message_id=None)
     if action.name == "new":
         peer = next(u for u in await ui.tasks.user_repo.participants() if u.id != actor.id)
         await form(state, target="SELF", peer_name=peer.display_name)

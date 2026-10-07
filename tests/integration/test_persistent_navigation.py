@@ -430,15 +430,19 @@ async def test_rerating_input_and_confirmation_restore_then_submit_actual_price(
     await driver.bot.session.close()
 
 
-async def test_initial_command_carrier_and_repeated_menu_keep_actual_inline_message(
-    factory, settings
-):
+async def test_menu_reopens_at_bottom_then_other_commands_edit_latest_screen(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/tasks")
     _, first = await dialog(driver)
-    for text in ("🏠 Меню", "/menu", "/menu", "📥 Входящие", "⚡ Шаблоны", "🏆 Результаты"):
+    current_id = first["message_id"]
+    for text in ("🏠 Меню", "/menu", "/menu"):
         await driver.text(1001, text)
-        assert (await dialog(driver))[1]["message_id"] == first["message_id"]
+        next_id = (await dialog(driver))[1]["message_id"]
+        assert next_id != current_id
+        current_id = next_id
+    for text in ("📥 Входящие", "⚡ Шаблоны", "🏆 Результаты"):
+        await driver.text(1001, text)
+        assert (await dialog(driver))[1]["message_id"] == current_id
     carriers = [
         c
         for c in driver.api.calls
@@ -449,7 +453,7 @@ async def test_initial_command_carrier_and_repeated_menu_keep_actual_inline_mess
         for c in driver.api.calls
         if isinstance(c, SendMessage) and not isinstance(c.reply_markup, ReplyKeyboardMarkup)
     ]
-    assert len(carriers) == 3 and len(inline) == 1
+    assert len(carriers) == 3 and len(inline) == 4
     await driver.bot.session.close()
 
 

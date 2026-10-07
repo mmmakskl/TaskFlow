@@ -70,6 +70,8 @@ async def navigation(
         await reset(state)
         if action.name == "menu":
             await reset(state, keep_navigation=False)
+            # Put the menu at the newest end of the chat instead of editing an old screen.
+            await state.update_data(message_id=None)
             screen = await ui.menu(actor)
         elif action.name == "list":
             filter_name = action.value or "mine_all"

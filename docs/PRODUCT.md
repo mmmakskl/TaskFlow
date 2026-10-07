@@ -153,4 +153,4 @@ Assign penalty opens the existing manual, explicitly confirmed form. A personal 
 its executor; a shared task asks which participant receives the penalty. The suggested editable
 comment contains task ID/title, deadline and observed lateness. Type and amount are chosen manually;
 no automatic penalty or award change occurs when a deadline passes. Repeated confirmation remains
-operation-key protected. No new database revision is needed beyond collaborative revision 0005.
+operation-key protected. Template deletion is soft deletion in revision 0006 so existing task snapshots and audit history remain intact.

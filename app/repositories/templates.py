@@ -14,6 +14,7 @@ class TaskTemplateRepository(Repository):
         query = select(TaskTemplate).order_by(TaskTemplate.id).offset(page * 5).limit(5)
         if creator_ids is not None:
             query = query.where(TaskTemplate.creator_user_id.in_(creator_ids))
+        query = query.where(TaskTemplate.is_deleted.is_(False))
         if active_only:
             query = query.where(TaskTemplate.is_active.is_(True))
         return list(await self.session.scalars(query))
@@ -24,6 +25,7 @@ class TaskTemplateRepository(Repository):
         query = select(func.count(TaskTemplate.id))
         if creator_ids is not None:
             query = query.where(TaskTemplate.creator_user_id.in_(creator_ids))
+        query = query.where(TaskTemplate.is_deleted.is_(False))
         if active_only:
             query = query.where(TaskTemplate.is_active.is_(True))
         return int(await self.session.scalar(query) or 0)

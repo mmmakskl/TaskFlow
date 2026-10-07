@@ -72,6 +72,7 @@ async def template_details(
                     "⏸ Выключить" if t.is_active else "✅ Включить", "tpl_toggle", t.id, t.version
                 )
             ],
+            [button("🗑 Удалить шаблон", "tpl_delete", t.id, t.version)],
             [button("⬅️ Шаблоны", "templates", page)],
         ),
     )
@@ -121,6 +122,27 @@ async def template_actions(
         await confirmed_action(state, a)
         await ui.templates.disable(actor, a.entity, a.version)
         await template_details(bot, actor, state, ui, a.entity)
+    elif a.name == "tpl_delete_confirm":
+        await confirmed_action(state, a)
+        await ui.templates.delete(actor, a.entity, a.version)
+        await template_list(bot, actor, state, ui)
+    elif a.name == "tpl_delete":
+        t = await ui.templates.view(actor, a.entity)
+        if t.version != a.version:
+            raise DomainError("Шаблон изменился. Открой его снова.")
+        confirm = await confirm_action(state, "tpl_delete_confirm", t.id, t.version)
+        await render(
+            bot,
+            actor.telegram_id,
+            state,
+            f"🗑 Удалить шаблон «{safe(t.title)}»? Созданные по нему задачи сохранят название и оценку.",
+            keyboard(
+                [("🗑 Удалить", confirm.pack())],
+                [button("❌ Отмена", "tpl_view", t.id)],
+            ),
+        )
+        await answer_callback(query)
+        return
     elif a.name == "tpl_new":
         await form(state, field="title")
         await field_prompt(bot, actor, state)
@@ -244,6 +266,8 @@ def create_router() -> Router:
                     "tpl_edit",
                     "tpl_toggle",
                     "tpl_disable_confirm",
+                    "tpl_delete",
+                    "tpl_delete_confirm",
                     "tpl_none",
                     "tpl_back",
                 }

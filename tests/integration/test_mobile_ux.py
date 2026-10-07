@@ -3,7 +3,6 @@ from datetime import UTC, datetime, timedelta
 from html import unescape
 
 import pytest
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import (
     AnswerCallbackQuery,
     EditMessageReplyMarkup,
@@ -304,23 +303,9 @@ async def test_cancelled_destructive_confirmation_stays_invalid(factory, setting
             ).is_active
 
 
-@pytest.mark.parametrize(
-    "error", ["message to edit not found", "message can't be edited", "message_id_invalid"]
-)
-async def test_deleted_menu_recovers_once_and_markup_only_refresh(factory, settings, error):
+async def test_menu_reopens_at_chat_bottom(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
-    original = driver.api.make_request
-    fail = True
-
-    async def request(bot, method, timeout=None):  # noqa: ASYNC109 - Bot API session signature
-        nonlocal fail
-        if fail and isinstance(method, (EditMessageText, EditMessageReplyMarkup)):
-            fail = False
-            raise TelegramBadRequest(method=method, message=error)
-        return await original(bot, method, timeout)
-
-    driver.api.make_request = request
     await driver.text(1001, "/menu")
     await driver.text(1001, "/menu")
     assert "НЕДЕЛЯ" in driver.screen(1001).text
@@ -333,9 +318,9 @@ async def test_deleted_menu_recovers_once_and_markup_only_refresh(factory, setti
                 and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
             ]
         )
-        == 2
+        == 3
     )
-    assert any(isinstance(call, EditMessageReplyMarkup) for call in driver.api.calls)
+    assert not any(isinstance(call, EditMessageText) for call in driver.api.calls)
 
 
 @pytest.mark.parametrize(

@@ -58,7 +58,7 @@ async def test_reversible_guards_preserve_all_data(factory, settings):
     assert await snapshot() == before
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
         )
     code, output = await alembic(settings, "check")
     assert code == 0, output
@@ -69,7 +69,7 @@ async def test_destructive_downgrades_refused_without_data_loss(factory, setting
     assert code != 0 and "RuntimeError" in output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
         )
         assert await session.scalar(select(func.count(PenaltyType.id))) == 7
     assert (await alembic(settings, "upgrade", "head"))[0] == 0
@@ -86,7 +86,7 @@ async def test_concurrent_empty_database_migrations(factory, settings):
         assert code == 0, output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
         )
         assert await session.scalar(select(func.count(Task.id))) == 0
         assert set(
