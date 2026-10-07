@@ -14,11 +14,27 @@ def notification_message(row: Notification, pending_count: int) -> tuple[str, In
             f"⭐ <b>Есть новые задачи на оценку</b>\n\nСейчас ждут твоей оценки: {pending_count}",
             keyboard([button("Оценить задачи", "ratings")]),
         )
+    if row.kind == "task_rejected":
+        return (
+            f"🚫 {safe(payload['actor'])}: предложение отклонено\n\n📝 {safe(payload['title'])}",
+            keyboard([button("Открыть задачу", "task", payload["task_id"])]),
+        )
     if row.kind == "rated":
+        amount = (
+            f"{payload['old_points']} → {payload['points']}"
+            if "old_points" in payload
+            else str(payload["points"])
+        )
+        if payload.get("shared"):
+            amount += " каждому"
+        status = (
+            "▶️ Задача остаётся в работе."
+            if payload.get("status") == "IN_PROGRESS"
+            else "Задача добавлена в «К выполнению»."
+        )
         return (
             f"⭐ {safe(payload['evaluator'])}: задача оценена\n\n"
-            f"📝 {safe(payload['title'])}\n💰 {payload['points']} баллов\n\n"
-            "Задача добавлена в «К выполнению».",
+            f"📝 {safe(payload['title'])}\n💰 {amount} баллов\n\n" + status,
             keyboard([button("Открыть задачу", "task", payload["task_id"])]),
         )
     if row.kind == "penalty_created":

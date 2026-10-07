@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot.ack import answer_callback
-from app.bot.handlers import common, penalties, settings, tasks
+from app.bot.handlers import common, penalties, settings, tasks, templates
 from app.bot.middlewares.access import AccessMiddleware
 from app.bot.render import discard_input, render, reset, validation_error
 from app.bot.storage import PostgresStorage
@@ -19,6 +19,7 @@ def create_dispatcher(config: Settings) -> Dispatcher:
     dispatcher.include_routers(
         common.create_router(),
         tasks.create_router(),
+        templates.create_router(),
         penalties.create_router(),
         settings.create_router(),
     )

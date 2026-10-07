@@ -9,6 +9,7 @@ from app.models import Notification, Penalty, PenaltyType, ScoreEvent, User
 from app.repositories.base import Repository
 from app.repositories.penalties import PenaltyRepository
 from app.repositories.tasks import TaskRepository
+from app.repositories.templates import TaskTemplateRepository
 from app.repositories.users import UserRepository
 from app.services.rules import DomainError, StaleAction, authenticated_identity
 
@@ -195,3 +196,34 @@ class MemoryResults(MemoryRepository):
                 )
                 output[key] = output.get(key, 0) + event.points
         return output
+
+
+class MemoryTemplates(MemoryRepository, TaskTemplateRepository):
+    async def by_operation(self, key):
+        from app.models import TaskTemplate
+
+        return next(
+            (row for row in self.session.of(TaskTemplate) if row.operation_key == key), None
+        )
+
+    async def list(self, active_only=True, page=0, *, creator_ids=None):
+        from app.models import TaskTemplate
+
+        return [
+            row
+            for row in self.session.of(TaskTemplate)
+            if (not active_only or row.is_active)
+            and (creator_ids is None or row.creator_user_id in creator_ids)
+        ][page * 5 : page * 5 + 5]
+
+    async def count(self, active_only=True, *, creator_ids=None):
+        from app.models import TaskTemplate
+
+        return len(
+            [
+                row
+                for row in self.session.of(TaskTemplate)
+                if (not active_only or row.is_active)
+                and (creator_ids is None or row.creator_user_id in creator_ids)
+            ]
+        )

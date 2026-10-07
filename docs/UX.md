@@ -1,5 +1,10 @@
 # Mobile forms and time planning
 
+For collaborative tasks, templates, complete participant lists, price changes and persistent
+navigation, see [PRODUCT.md](PRODUCT.md). The task wizard described below is historical; the current
+creation flow is target → title → editable draft card → explicit Create. Deadline/effort/comment
+editors retain the calendar, presets, escaping and generation guards described here.
+
 ## Navigation
 
 Task creation runs through title → deadline → effort estimate → optional comment.
@@ -80,3 +85,33 @@ Notification and old-menu navigation adopts the clicked message as the current U
 previous keyboard. This keeps the opened screen where the user is looking, without sending another
 message. Mutating callbacks from the retired message are rejected. A mutation must also match a button on the
 current keyboard, so an old cached “Complete” cannot execute after returning to the dashboard.
+
+## Collaborative UI acceptance
+
+Persistent quick actions: Menu/New, Tasks/Inbox, Templates/Results. Native commands mirror them.
+Menu/cancel discard directly; other quick transitions confirm before discarding an unfinished form.
+Stay restores draft data and valid controls. Quick-button text is reserved navigation, never a title
+or comment. Bottom keyboard installation is separate from the edited inline screen.
+
+Task scope/filter/page survives viewing, edits and status actions. Everyone can inspect cards;
+visible mutation buttons follow service permissions. Shared prices always say “each”, completion
+says “Done for us”, and reopen confirmation explains both reversals. User summaries cover the
+whole participant dataset regardless of page/filter and distinguish planned from earned points.
+
+Price changes show the previous/new amount and require current nonce/version confirmation.
+Automatic template pricing is labelled, and stale template selections require explicit resubmission.
+
+## Deadline visibility and manual penalties
+
+The overdue filter includes unfinished past-deadline tasks and tasks completed after their
+deadline, excluding cancelled tasks. Mine/peer/shared/assigned scopes and five-item pagination
+continue to apply; personal totals remain independent of the selected filter. Deadline and
+planned duration are both visible in list rows. Cards show the deadline in the viewer’s timezone,
+elapsed delay or fixed completion lateness, and Refresh. Date-only entry uses the final microsecond
+of the selected local day. Completed-on-time tasks do not become overdue later.
+
+Assign penalty opens the existing manual, explicitly confirmed form. A personal task preselects
+its executor; a shared task asks which participant receives the penalty. The suggested editable
+comment contains task ID/title, deadline and observed lateness. Type and amount are chosen manually;
+no automatic penalty or award change occurs when a deadline passes. Repeated confirmation remains
+operation-key protected. No new database revision is needed beyond collaborative revision 0005.

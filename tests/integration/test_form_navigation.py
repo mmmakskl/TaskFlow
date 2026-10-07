@@ -1,5 +1,6 @@
 import pytest
 from aiogram.methods import SendMessage
+from aiogram.types import ReplyKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.models import AuditEvent, Penalty, PenaltyType, ScoreEvent, Task, User
@@ -24,27 +25,31 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
     await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Сделать <план>")
+    await driver.press(1001, "Название")
     await driver.press(1001, "⬅️ Назад")
     assert "Сделать &lt;план&gt;" in driver.screen(1001).text
-    await driver.press(1001, "Оставить название")
+    await driver.press(1001, "Дедлайн")
     await driver.press(1001, "Выбрать дату")
     await driver.press(1001, "⬅️ Назад")
-    assert "Сегодня" in str(driver.screen(1001).reply_markup)
-    await driver.press(1001, "Без дедлайна")
+    await driver.press(1001, "⬅️ Назад")
+    await driver.press(1001, "⏱ Время")
     old_choice = data_for(driver, 1001, "30 мин")
     await driver.press(1001, "30 мин")
-    await driver.press(1001, "⬅️ Назад")
+    await driver.press(1001, "⏱ Время")
     await driver.press(1001, data=old_choice)
     assert "Сколько времени" in driver.screen(1001).text
     await driver.text(1001, "95")
+    await driver.press(1001, "Комментарий")
     await driver.press(1001, "Добавить комментарий")
     await driver.press(1001, "⬅️ Назад")
-    create_callback = await driver.press(1001, "Пропустить")
+    await driver.press(1001, "Пропустить")
+    create_callback = await driver.press(1001, "✅ Создать")
     await driver.press(1001, data=create_callback)
     assert "~1 ч 35 мин" in driver.screen(1001).text
     await driver.text(1002, "/start")
-    await driver.press(1002, "Оценить")
+    await driver.press(1002, "Входящие")
     assert "План: ~1 ч 35 мин" in driver.screen(1002).text
     await driver.press(1001, "К задачам")
     assert "~1 ч 35 мин" in driver.screen(1001).text
@@ -75,7 +80,11 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
             event.old_data["estimated_minutes"] == 120
             and event.new_data["estimated_minutes"] is None
         )
-    sends = [call for call in driver.api.calls if isinstance(call, SendMessage)]
+    sends = [
+        call
+        for call in driver.api.calls
+        if isinstance(call, SendMessage) and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+    ]
     assert len(sends) == 2
     await driver.bot.session.close()
 
@@ -85,11 +94,12 @@ async def test_invalid_estimate_keeps_form(factory, settings, bad):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
     await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Estimate")
-    await driver.press(1001, "Без дедлайна")
+    await driver.press(1001, "⏱ Время")
     await driver.text(1001, bad)
     await driver.press(1001, "15 мин")
-    await driver.press(1001, "Пропустить")
+    await driver.press(1001, "✅ Создать")
     async with factory() as session:
         assert (await session.scalar(select(Task))).estimated_minutes == 15
     await driver.bot.session.close()
@@ -205,6 +215,8 @@ async def test_estimate_edit_permissions_and_completion_snapshot(factory, settin
         task = await service.create(max_user, "Time planning", "estimate-key", estimate=90)
         await service.rate(vika, task.id, 500, task.version)
         await service.edit(max_user, task.id, task.version, estimated_minutes=120)
+        assert task.status == "BACKLOG"
+        await service.rate(vika, task.id, 500, task.version)
         await service.change_status(max_user, task.id, "DONE", task.version)
         assert task.awarded_points == 500 and task.estimated_minutes == 120
         with pytest.raises(DomainError):
@@ -223,11 +235,17 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
 
     from tests.integration.test_business_migrations import alembic
 
-    code, output = await alembic(settings, "downgrade", "0002")
+    async with factory.begin() as session:
+        await session.execute(text("DROP SCHEMA taskflow CASCADE"))
+        await session.execute(text("DROP TABLE public.alembic_version"))
+    code, output = await alembic(settings, "upgrade", "0001")
     assert code == 0, output
     async with factory.begin() as session:
-        await session.execute(text("ALTER TABLE taskflow.tasks DROP COLUMN estimated_minutes"))
-        await session.execute(text("UPDATE public.alembic_version SET version_num = '0001'"))
+        await session.execute(
+            text(
+                "INSERT INTO taskflow.users (id,telegram_id,display_name,role,timezone,weekly_target,created_at,updated_at) VALUES (1,1001,'Max','max','UTC',10000,now(),now()),(2,1002,'Vika','vika','UTC',10000,now(),now())"
+            )
+        )
         await session.execute(
             text(
                 "INSERT INTO taskflow.tasks (owner_user_id,evaluator_user_id,title,status,operation_key,version,created_at,updated_at) SELECT m.id,v.id,'Existing task','BACKLOG','legacy',1,now(),now() FROM taskflow.users m CROSS JOIN taskflow.users v WHERE m.role='max' AND v.role='vika'"
@@ -247,7 +265,7 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
         task = await session.scalar(select(Task))
         assert task.title == "Existing task" and task.estimated_minutes is None
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
         )
 
 

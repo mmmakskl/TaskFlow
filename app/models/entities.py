@@ -28,6 +28,12 @@ class TaskStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class TaskTarget(StrEnum):
+    SELF = "SELF"
+    PEER = "PEER"
+    SHARED = "SHARED"
+
+
 class CalculationType(StrEnum):
     PER_MINUTE = "PER_MINUTE"
     FIXED = "FIXED"
@@ -66,6 +72,16 @@ class Task(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     evaluator_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    creator_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String(20), default="PERSONAL")
+    shared_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    proposed_points: Mapped[int | None] = mapped_column(Integer)
+    proposal_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    first_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rating_source: Mapped[str | None] = mapped_column(String(20))
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("task_templates.id"))
+    template_version: Mapped[int | None] = mapped_column(Integer)
+    template_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     title: Mapped[str] = mapped_column(String(200))
     comment: Mapped[str | None] = mapped_column(String(1500))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -82,7 +98,16 @@ class Task(TimestampMixin, Base):
     operation_key: Mapped[str] = mapped_column(String(80), unique=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     __table_args__ = (
-        CheckConstraint("owner_user_id <> evaluator_user_id"),
+        CheckConstraint("kind IN ('PERSONAL','SHARED')", name="ck_tasks_kind"),
+        CheckConstraint(
+            "(kind = 'PERSONAL' AND shared_user_id IS NULL) OR (kind = 'SHARED' AND shared_user_id IS NOT NULL AND shared_user_id <> owner_user_id)",
+            name="ck_tasks_participants",
+        ),
+        CheckConstraint("evaluator_user_id <> proposal_by_user_id", name="ck_tasks_other_approver"),
+        CheckConstraint(
+            "proposed_points IS NULL OR proposed_points BETWEEN 1 AND 10000",
+            name="ck_tasks_proposed_points",
+        ),
         CheckConstraint("rated_points IS NULL OR rated_points BETWEEN 1 AND 10000"),
         CheckConstraint("awarded_points IS NULL OR awarded_points BETWEEN 1 AND 10000"),
         CheckConstraint("length(title) BETWEEN 1 AND 200"),
@@ -95,13 +120,21 @@ class Task(TimestampMixin, Base):
         CheckConstraint(
             "status <> 'DONE' OR (completed_at IS NOT NULL AND awarded_points IS NOT NULL)"
         ),
+        CheckConstraint(
+            "((template_id IS NULL AND template_version IS NULL AND template_snapshot IS NULL) OR (template_id IS NOT NULL AND template_version IS NOT NULL AND template_version > 0 AND template_snapshot IS NOT NULL AND jsonb_typeof(template_snapshot) = 'object' AND jsonb_typeof(template_snapshot->'title') = 'string' AND length(template_snapshot->>'title') BETWEEN 1 AND 200 AND jsonb_typeof(template_snapshot->'points') = 'number' AND (template_snapshot->>'points')::integer BETWEEN 1 AND 10000 AND template_snapshot ? 'estimated_minutes' AND (jsonb_typeof(template_snapshot->'estimated_minutes') = 'null' OR (jsonb_typeof(template_snapshot->'estimated_minutes') = 'number' AND (template_snapshot->>'estimated_minutes')::integer BETWEEN 1 AND 10080)))) IS TRUE",
+            name="ck_tasks_template_snapshot",
+        ),
+        CheckConstraint(
+            "(rating_source IS DISTINCT FROM 'TEMPLATE' OR (template_id IS NOT NULL AND rated_points = (template_snapshot->>'points')::integer AND title = template_snapshot->>'title' AND estimated_minutes IS NOT DISTINCT FROM (template_snapshot->>'estimated_minutes')::integer)) IS TRUE",
+            name="ck_tasks_template_rating",
+        ),
         CheckConstraint("version > 0", name="ck_tasks_version"),
         CheckConstraint(
             "status = 'DONE' OR (completed_at IS NULL AND awarded_points IS NULL)",
             name="ck_tasks_no_uncompleted_award",
         ),
         CheckConstraint(
-            "(rated_points IS NULL AND rated_by_user_id IS NULL AND rated_at IS NULL) OR (rated_points IS NOT NULL AND rated_by_user_id IS NOT NULL AND rated_at IS NOT NULL)",
+            "((rated_points IS NULL AND rated_by_user_id IS NULL AND rated_at IS NULL AND rating_source IS NULL) OR (rated_points IS NOT NULL AND rated_at IS NOT NULL AND ((rating_source = 'MANUAL' AND rated_by_user_id IS NOT NULL) OR (rating_source = 'TEMPLATE' AND rated_by_user_id IS NULL)))) IS TRUE",
             name="ck_tasks_rating_complete",
         ),
         CheckConstraint(
@@ -130,7 +163,38 @@ class Task(TimestampMixin, Base):
         ),
         Index("ix_tasks_owner_status_id", "owner_user_id", "status", "id"),
         Index("ix_tasks_evaluator_status_id", "evaluator_user_id", "status", "id"),
+        Index("ix_tasks_shared_status", "shared_user_id", "status", "id"),
         Index("ix_tasks_completed_at", "completed_at"),
+    )
+
+    @property
+    def participant_user_ids(self) -> tuple[int, ...]:
+        return (
+            (self.owner_user_id, self.shared_user_id)
+            if self.shared_user_id
+            else (self.owner_user_id,)
+        )
+
+
+class TaskTemplate(TimestampMixin, Base):
+    __tablename__ = "task_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    creator_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    seed_key: Mapped[str | None] = mapped_column(String(32), unique=True)
+    title: Mapped[str] = mapped_column(String(200))
+    estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+    points: Mapped[int] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    operation_key: Mapped[str] = mapped_column(String(80), unique=True)
+    __table_args__ = (
+        CheckConstraint("length(title) BETWEEN 1 AND 200", name="ck_templates_title"),
+        CheckConstraint("points BETWEEN 1 AND 10000", name="ck_templates_points"),
+        CheckConstraint(
+            "estimated_minutes IS NULL OR estimated_minutes BETWEEN 1 AND 10080",
+            name="ck_templates_effort",
+        ),
+        CheckConstraint("version > 0", name="ck_templates_version"),
     )
 
 

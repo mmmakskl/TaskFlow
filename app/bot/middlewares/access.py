@@ -14,6 +14,7 @@ from app.bot.middlewares.interaction import (
     draft_valid,
     input_warning,
 )
+from app.bot.navigation import handle_navigation
 from app.bot.render import discard_input, render, reset, validation_error
 from app.config.settings import Settings
 from app.repositories.base import Repository
@@ -75,6 +76,19 @@ class AccessMiddleware(BaseMiddleware):
         )
         data["settings_service"] = SettingsService(repo, self.settings)
         state: FSMContext = data["state"]
+        try:
+            async with session.begin_nested():
+                if isinstance(event, (Message, CallbackQuery)) and await handle_navigation(
+                    event, data
+                ):
+                    return None
+        except DomainError as exc:
+            if isinstance(event, CallbackQuery):
+                await answer_callback(event, str(exc), show_alert=True)
+            elif isinstance(event, Message):
+                await validation_error(data["bot"], chat.id, state, str(exc))
+                await discard_input(event)
+            return None
         current = await state.get_state()
         if not draft_valid(current, await state.get_data()):
             await reset(state, keep_navigation=False)

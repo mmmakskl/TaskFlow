@@ -3,8 +3,8 @@
 ## Boundaries and transaction ownership
 
 Telegram middleware resolves an authenticated Telegram identity. Services independently reload that
-identity and verify its database ID and ENV allow-list membership. Task owners cannot be supplied as
-form fields; the evaluator is the other configured participant. Additional database users do not
+identity and verify its database ID and ENV allow-list membership. Executors are derived from a typed SELF/PEER/SHARED choice, never arbitrary form IDs.
+The approver is the other configured participant relative to the current proposal author. Additional database users do not
 become authorized participants.
 
 Handlers delegate to services. Repositories own SQL, pagination, row locks, advisory locks and outbox
@@ -26,18 +26,25 @@ reading their attributes; rollback may expire them. An outer rollback discards e
 
 ## Task and scoring invariants
 
-- New tasks are `BACKLOG`, unrated and worth zero earned points.
-- Only the evaluator may rate, using an integer 1–10000; rating transitions to `TODO`.
-- Only the owner changes status. Completing `TODO`/`IN_PROGRESS` copies the rating to
-  `awarded_points` and sets `completed_at` in the same transaction.
-- A task score event uses `completed_at`, independent of task creation or later rating changes.
-- Confirmed reopening/cancellation inserts the negative award at its **original** effective timestamp
-  and clears completion fields. Recompletion inserts a fresh award in the new completion week.
-- Results aggregate immutable signed events: task awards minus non-deleted penalties, including
-  compensating events. History is recomputed, never stored as editable weekly totals.
-- The shared competition timezone is `DEFAULT_TIMEZONE`; user timezones control personal date
-  presentation. Weeks are local Monday midnight to the next Monday, with an exclusive upper bound.
-  DST weeks may contain 167 or 169 hours. Negative results remain negative.
+- Ordinary tasks are BACKLOG until approved; unchanged template SELF/SHARED tasks are TODO.
+  Template PEER tasks still require acceptance. Approval itself earns zero points.
+- Creator, executor(s), proposal author and current rating author are separate roles. Before first
+  acceptance creator controls the offer; afterwards only the personal executor, or either shared
+  participant, controls work. Both configured users may view all tasks.
+- Title/effort changes reset approval and propose the previous price to the other editor;
+  deadline/comment do not. First acceptance is retained. Cancelled tasks are terminal.
+- Only the current manual rater may rerate TODO/IN_PROGRESS after explicit confirmation. Status
+  remains unchanged. No DONE/CANCELLED rerating, no retrospective score changes.
+- Completion snapshots the price in awarded_points. A shared snapshot is per person and inserts
+  two user-specific score events in one locked transaction, with one completed_at.
+- Reopen inserts negative snapshots at the original completed_at for every beneficiary.
+  Recompletion inserts fresh awards in its new completion week; history is never overwritten.
+- Results sum immutable ledger events within half-open Monday-to-Monday DEFAULT_TIMEZONE bounds.
+  User timezones affect display/deadlines only. DST weeks may have 167 or 169 hours.
+- User task summaries cover all pages/filters: TODO and IN_PROGRESS planned points, pending count,
+  and all-time category=task ledger sum without penalties. Shared work counts once per person.
+- Template data is snapshotted; later template edits never rewrite a task's terms. Creation locks
+  and checks the selected template version/active status; mismatches require explicit resubmission.
 
 ## Penalties and concurrency
 
@@ -47,7 +54,7 @@ creation. Type changes never recalculate existing penalties; PostgreSQL rejects 
 Deletion is soft and inserts a compensating event in the original penalty week.
 
 Creation operation keys are required and unique. Transaction advisory locks serialize duplicate
-creates; repeats return the original record only to the original actor. Row locks plus strict version
+creates; repeats return the original record only to the original creator, independently of task executor. Row locks plus strict version
 checks serialize rating, completion, reopening, deletion and configuration. Stale repeats fail safely
 without another score/audit/notification mutation. Outbox writes share the business transaction.
 Rating batches have a partial unique index; a locked persistent user cooldown permits at most one

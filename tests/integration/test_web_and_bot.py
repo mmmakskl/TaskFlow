@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from aiogram import Bot
 from aiogram.methods import EditMessageReplyMarkup, EditMessageText, SendMessage
+from aiogram.types import ReplyKeyboardMarkup
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, update
 
@@ -53,7 +54,12 @@ class BotDriver:
         self.next_update = 100
 
     def screen(self, user_id: int):
-        calls = [call for call in self.api.calls if getattr(call, "chat_id", None) == user_id]
+        calls = [
+            call
+            for call in self.api.calls
+            if getattr(call, "chat_id", None) == user_id
+            and not isinstance(getattr(call, "reply_markup", None), ReplyKeyboardMarkup)
+        ]
         text_call = next(
             call for call in reversed(calls) if isinstance(call, (SendMessage, EditMessageText))
         )
@@ -134,17 +140,16 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
     driver.api.expired_ack = expired_ack
     await driver.text(1001, "/start")
     await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Купить <билеты>")
-    await driver.press(1001, "Без дедлайна")
-    await driver.press(1001, "Не указывать")
-    await driver.press(1001, "Пропустить")
+    await driver.press(1001, "✅ Создать")
     assert "&lt;билеты&gt;" in driver.screen(1001).text
     await driver.text(1002, "/start")
-    await driver.press(1002, "Оценить")
+    await driver.press(1002, "Входящие")
     rating_callback = await driver.press(1002, "500")
     await driver.press(1002, data=rating_callback)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "📋 Задачи")
+    await driver.press(1001, "Все задачи")
     await driver.press(1001, "Купить")
     done_callback = await driver.press(1001, "Выполнено")
     await driver.press(1001, data=done_callback)
@@ -152,7 +157,11 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
         task = await session.scalar(select(Task))
         assert task.status == "DONE" and task.awarded_points == 500
         assert await session.scalar(select(func.count(ScoreEvent.id))) == 1
-    sends = [call for call in driver.api.calls if isinstance(call, SendMessage)]
+    sends = [
+        call
+        for call in driver.api.calls
+        if isinstance(call, SendMessage) and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+    ]
     assert len(sends) == 2  # One UI message per authorized user.
     await driver.bot.session.close()
 
@@ -239,14 +248,17 @@ async def test_calendar_comment_edit_and_custom_rating_reopen(factory, settings:
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
     await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Проверить календарь")
+    await driver.press(1001, "Дедлайн")
     await driver.press(1001, "Выбрать дату")
     await driver.press(1001, "Без дедлайна")
-    await driver.press(1001, "Не указывать")
+    await driver.press(1001, "Комментарий")
     await driver.press(1001, "Добавить комментарий")
     await driver.text(1001, "<Комментарий>")
+    await driver.press(1001, "✅ Создать")
     await driver.text(1002, "/start")
-    await driver.press(1002, "Оценить")
+    await driver.press(1002, "Входящие")
     await driver.press(1002, "Другое")
     await driver.text(1002, "800")
     await driver.press(1001, "К задачам")
@@ -281,10 +293,9 @@ async def test_uvicorn_process_restart_preserves_database(factory, settings: Set
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
     await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Persistent task")
-    await driver.press(1001, "Без дедлайна")
-    await driver.press(1001, "Не указывать")
-    await driver.press(1001, "Пропустить")
+    await driver.press(1001, "✅ Создать")
     async with factory.begin() as session:
         await session.execute(update(Notification).values(status="skipped"))
     for _ in range(2):

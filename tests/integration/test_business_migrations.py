@@ -50,27 +50,26 @@ async def test_reversible_guards_preserve_all_data(factory, settings):
             ]
 
     before = await snapshot()
-    code, output = await alembic(settings, "downgrade", "0002")
-    assert code == 0, output
+    code, output = await alembic(settings, "downgrade", "0004")
+    assert code != 0 and "no destructive downgrade" in output
     assert await snapshot() == before
     code, output = await alembic(settings, "upgrade", "head")
     assert code == 0, output
     assert await snapshot() == before
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
         )
     code, output = await alembic(settings, "check")
     assert code == 0, output
 
 
 async def test_destructive_downgrades_refused_without_data_loss(factory, settings):
-    assert (await alembic(settings, "downgrade", "0002"))[0] == 0
     code, output = await alembic(settings, "downgrade", "0001")
     assert code != 0 and "RuntimeError" in output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0002"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
         )
         assert await session.scalar(select(func.count(PenaltyType.id))) == 7
     assert (await alembic(settings, "upgrade", "head"))[0] == 0
@@ -87,7 +86,7 @@ async def test_concurrent_empty_database_migrations(factory, settings):
         assert code == 0, output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0004"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0005"
         )
         assert await session.scalar(select(func.count(Task.id))) == 0
         assert set(
@@ -98,17 +97,19 @@ async def test_concurrent_empty_database_migrations(factory, settings):
 
 
 async def test_invalid_legacy_data_aborts_guards_without_rewriting_rows(factory, settings):
-    assert (await alembic(settings, "downgrade", "0002"))[0] == 0
     async with factory.begin() as session:
-        repo = TaskRepository(session)
-        owner, peer = await repo.users()
-        session.add(
-            Task(
-                owner_user_id=owner.id,
-                evaluator_user_id=peer.id,
-                title="Invalid legacy row",
-                status="TODO",
-                operation_key="legacy-invalid",
+        await session.execute(text("DROP SCHEMA taskflow CASCADE"))
+        await session.execute(text("DROP TABLE public.alembic_version"))
+    assert (await alembic(settings, "upgrade", "0002"))[0] == 0
+    async with factory.begin() as session:
+        await session.execute(
+            text(
+                "INSERT INTO taskflow.users (id,telegram_id,display_name,role,timezone,weekly_target,created_at,updated_at) VALUES (1,1001,'Max','max','UTC',10000,now(),now()),(2,1002,'Vika','vika','UTC',10000,now(),now())"
+            )
+        )
+        await session.execute(
+            text(
+                "INSERT INTO taskflow.tasks (owner_user_id,evaluator_user_id,title,status,operation_key,version,created_at,updated_at) VALUES (1,2,'Invalid legacy row','TODO','legacy-invalid',1,now(),now())"
             )
         )
     code, output = await alembic(settings, "upgrade", "head")
@@ -117,7 +118,7 @@ async def test_invalid_legacy_data_aborts_guards_without_rewriting_rows(factory,
         assert (
             await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0002"
         )
-        task = await session.scalar(select(Task))
+        task = (await session.execute(text("SELECT status,rated_points FROM taskflow.tasks"))).one()
         assert task.status == "TODO" and task.rated_points is None
         assert not await session.scalar(
             text(

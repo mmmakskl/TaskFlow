@@ -84,6 +84,9 @@ async def test_maximum_unicode_task_screens_and_callbacks_fit_limits():
         id=2147483647,
         version=2147483647,
         owner_user_id=1,
+        creator_user_id=1,
+        proposal_by_user_id=1,
+        kind="PERSONAL",
         evaluator_user_id=2,
         title="😀" * 200,
         comment="😀" * 1500,
@@ -97,7 +100,11 @@ async def test_maximum_unicode_task_screens_and_callbacks_fit_limits():
     repo = SimpleNamespace(
         users=AsyncMock(return_value=users), pending_next=AsyncMock(return_value=(task, 1))
     )
-    tasks = SimpleNamespace(view=AsyncMock(return_value=task), repo=repo)
+    tasks = SimpleNamespace(
+        view=AsyncMock(return_value=task),
+        repo=repo,
+        can_manage=lambda task, actor: task.owner_user_id == actor.id,
+    )
     ui = UIService(tasks, None, None)
 
     class VisibleText(HTMLParser):

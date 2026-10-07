@@ -1,14 +1,15 @@
 # Data model
 
-All nine application tables are in the `taskflow` PostgreSQL schema. The Alembic revision table is
+All ten application tables are in the `taskflow` PostgreSQL schema. The Alembic revision table is
 `public.alembic_version`. Migrations own schema, constraints, indexes and immutable-event triggers.
-Current head: **0004**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
+Current head: **0005**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
 Schema separation is not a permission boundary: do not expose it through a public Data API.
 
 | Table | Responsibilities |
 | --- | --- |
 | users | Unique Telegram identity, role, name, timezone, target, rating cooldown |
 | tasks | Owner/evaluator, text, deadline, optional estimated_minutes, status, rating, awarded snapshot, lifecycle timestamps, version and operation key |
+| task_templates | Shared title, effort, fixed points, active flag, creator, version, operation and seed keys |
 | penalty_types | Live name/emoji/description, PER_MINUTE/FIXED/MANUAL calculation, rate, active flag, sort order, version and unique seed key |
 | penalties | Target/creator/type FKs, full type snapshots, quantity, points, comment, version, operation key and soft deletion |
 | audit_events | Actor, entity/action, old/new JSONB and timestamp; immutable |
@@ -17,7 +18,9 @@ Schema separation is not a permission boundary: do not expose it through a publi
 | telegram_updates | Unique update ID, durable payload, attempts, due time and status |
 | notifications | Recipient, kind, snapshot payload, unique dedupe key, status/due time, attempts, claim/finish timestamps and bounded error code |
 
-Task owner and evaluator must differ; rated_by must equal evaluator. Rated points are 1–10000. DONE requires completion time and awarded snapshot; other states have neither. The service layer enforces the allowed transition graph and actor permissions. Foreign keys retain referenced records; task cancellation and penalty deletion are non-destructive.
+Creator, personal executor, proposal author and approver are distinct roles. The approver must differ
+from proposal author; a peer-assigned executor may approve their own assigned task. Manual rated_by
+must equal approver; automatic TEMPLATE rating has no manual rater. Rated points are 1–10000. DONE requires completion time and awarded snapshot; other states have neither. The service layer enforces the allowed transition graph and actor permissions. Foreign keys retain referenced records; task cancellation and penalty deletion are non-destructive.
 
 Indexes support owner/status pagination, pending evaluator tasks, completion dates, ledger date/user aggregation, due notifications and ordered inbox processing. A partial unique index permits only one pending rating batch per recipient. Version checks prevent stale configuration and entity callbacks from overwriting newer changes.
 
@@ -38,7 +41,8 @@ The initial downgrade deliberately refuses to drop all production data. Immutabl
 
 ## Business guards (revision 0003)
 
-Rating fields are either all null or all populated. BACKLOG is unrated; TODO/IN_PROGRESS/DONE are
+For manual ratings, fields are either all null or all populated. Revision 0005 adds explicit TEMPLATE
+provenance and requires a template snapshot for automatic ratings. BACKLOG is unrated; TODO/IN_PROGRESS/DONE are
 rated. CANCELLED requires its cancellation timestamp; only DONE retains completion/award fields.
 Versions are positive. Penalty calculation checks enforce minute × rate, fixed rate and manual
 quantity shapes; multiplication uses bigint to avoid overflow. A trigger prevents alteration of
@@ -100,3 +104,22 @@ diagnostics. Pause consumers and back up first; prefer a forward fix.
 Metadata autogeneration cannot fully describe custom triggers/backfills. Review revision SQL and
 update tests for constraints, populated upgrades, rollback safety and real concurrent operations.
 See [BUSINESS.md](BUSINESS.md), [TESTING.md](TESTING.md) and [OPERATIONS.md](OPERATIONS.md).
+
+## Collaborative tasks (revision 0005)
+
+Adds task creator, PERSONAL/SHARED kind, optional second participant, proposal author/points, first
+acceptance, rating source, and template ID/version/snapshot. The two participant columns expose a
+synchronous participant_user_ids tuple; exactly two configured users make a separate membership
+table unnecessary. Creator and participant identity and original template snapshot are immutable.
+First acceptance cannot be cleared after reapproval. Legacy tasks become PERSONAL with creator=owner
+and existing manual rating provenance; score and audit records remain unchanged.
+
+Shared completion posts a separate immutable event for each participant, keyed by task/user/cycle.
+The single awarded_points is the price per participant, not their combined reward. A shared reopen
+compensates each event at the original completion time.
+
+New task_templates records store shared fixed-price presets with versioned edits and soft disable.
+Snapshot/version and automatic-price provenance distinguish generated tasks from manual approval.
+
+Revision 0005 refuses destructive downgrade. Once collaborative data exists, old application code
+is incompatible: do not run old and new workers together; prefer forward fixes.

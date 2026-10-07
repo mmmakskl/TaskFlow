@@ -17,9 +17,12 @@ from app.bot.keyboards.forms import controls
 from app.bot.render import discard_input, render, require_current, reset, safe
 from app.bot.states.forms import PenaltyForm
 from app.models import User
+from app.services.deadlines import deadline_delay, delay_label
 from app.services.penalties import PenaltyService
 from app.services.rules import DomainError, text_field
-from app.services.ui import UIService, points
+from app.services.tasks import TaskService
+from app.services.ui import UIService, deadline, points
+from app.utils.time import utcnow
 
 
 async def confirmation(bot: Bot, actor: User, state: FSMContext, service: PenaltyService) -> None:
@@ -54,9 +57,24 @@ async def penalty_callback(
     actor: User,
     penalty_service: PenaltyService,
     ui: UIService,
+    task_service: TaskService,
 ) -> None:
     action = callback_data
-    if action.name == "penalty":
+    if action.name == "task_penalty":
+        task = await task_service.deadline_penalty_task(actor, action.entity, action.version)
+        delay = deadline_delay(task, utcnow())
+        assert delay is not None
+        context = (
+            f"Просрочка задачи #{task.id}: {task.title}\n"
+            f"Дедлайн: {deadline(task, actor)}\n"
+            f"{'Опоздание при выполнении' if task.status == 'DONE' else 'Просрочка при открытии формы'}: {delay_label(delay)}"
+        )
+        await form(state, deadline_comment=context, comment=context, target_id=task.owner_user_id)
+        if task.kind == "SHARED":
+            await target_prompt(bot, actor, state, penalty_service)
+        else:
+            await kind_prompt(bot, actor, state, ui)
+    elif action.name == "penalty":
         await form(state)
         await target_prompt(bot, actor, state, penalty_service)
     elif action.name == "penalty_target":
@@ -64,15 +82,16 @@ async def penalty_callback(
         user_ids = {user.id for user in await penalty_service.users()}
         if action.entity not in user_ids:
             raise DomainError("Этот пользователь недоступен.")
-        await state.update_data(target_id=action.entity, comment=None, preview=None)
+        data = await state.get_data()
+        await state.update_data(
+            target_id=action.entity, comment=data.get("deadline_comment"), preview=None
+        )
         await kind_prompt(bot, actor, state, ui)
     elif action.name == "penalty_kinds":
         data = await require_current(state, PenaltyForm.kind.state)
         if action.value != str(data["flow"]):
             raise DomainError("Эта кнопка относится к другой форме. Обнови меню.")
-        await show(
-            await ui.penalty_types(action.entity, flow=data["flow"]), bot, actor.telegram_id, state
-        )
+        await kind_prompt(bot, actor, state, ui, action.entity)
     elif action.name == "penalty_type":
         data = await require_current(state, PenaltyForm.kind.state)
         if action.value != str(data["flow"]):
@@ -84,7 +103,7 @@ async def penalty_callback(
             type_id=kind.id,
             type_version=kind.version,
             calculation_type=kind.calculation_type,
-            comment=None,
+            comment=data.get("deadline_comment"),
             preview=None,
         )
         if kind.calculation_type == "FIXED":
@@ -249,6 +268,7 @@ def create_router() -> Router:
             F.name.in_(
                 {
                     "penalty",
+                    "task_penalty",
                     "penalty_target",
                     "penalty_kinds",
                     "penalty_type",

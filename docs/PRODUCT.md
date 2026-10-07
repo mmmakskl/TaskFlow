@@ -6,57 +6,80 @@ TaskFlow is a Russian-language private productivity bot for two configured Teleg
 and Vika. Usernames are not credentials: only allowed numeric sender IDs in their matching private
 chats gain access. Both see results and penalties; a third account or group chat is denied.
 
-Each creates tasks for themselves. The other participant alone supplies the rating. The owner edits
-active task fields and changes task status. Either participant can assign a penalty to either user,
-confirm its deletion, and edit shared penalty types. These are the implemented trust rules.
+Tasks can be created for oneself, the other participant or both. Both can view every configured
+participant's tasks and statuses. Before first acceptance the creator controls an offer; after
+acceptance the personal executor controls it. Shared tasks are controlled by both. Approval rights
+belong to the other participant relative to the current proposal author, independently of executor.
+Either participant can assign penalties and maintain shared penalty types and task templates.
 
 ## Dashboard and navigation
 
-`/start`, `/menu` and `/cancel` restore the dashboard and interrupt forms. Normal use is inline:
-Add task, Penalty, Tasks, Rate, Results and Settings. Dashboard shows both weekly results/targets,
-the sender's active-task count and pending peer-rating count. Empty queues show “Всё оценено”.
+The dashboard shows both weekly results, pending approvals and active tasks. A persistent bottom
+keyboard opens Menu, New task, Tasks, Inbox, Templates and Results. Matching commands are `/menu`,
+`/new`, `/tasks`, `/inbox`, `/templates`, `/results`; `/start` and `/cancel` remain available.
+Menu/cancel discard the current form. Other quick navigation during an unfinished form requires
+Leave and discard / Stay, preserving inputs on Stay. Context actions remain inline in one edited
+screen. Shared tasks also have a separate dashboard entry.
 
-Prefer one edited message, five-item lists, Back, optional skips and numeric presets. Invalid text
-keeps the current step/buttons; stale buttons cannot overwrite newer data. Deleted menu messages
-are replaced. Unfinished valid forms persist across restart; opening the menu discards the draft.
+Task tabs are Mine, Peer, Shared and Assigned by me. Mine/Peer include shared work, marked explicitly.
+Filters include All (default), Active, In progress, Pending agreement, Done and Archive. Lists have
+five items per page and preserve tab/filter/page when returning from a card. The user-level summary
+covers the entire list regardless of filter/page: TODO points, IN_PROGRESS points, combined plan,
+pending count and all-time completed task ledger points excluding penalties. Shared awards count
+once at full value per participant. Unapproved prices and cancelled work do not enter the plan.
 
 ## Create and edit a task
 
-1. Enter a trimmed title, 1–200 characters.
-2. Pick no deadline (one tap), today, tomorrow or a date in the inline calendar.
-3. Skip effort estimate or choose 5/15/30/60/120/240 minutes; custom integer 1–10080 is allowed.
-4. Skip comment or enter 1–1500 characters; submitting this final step creates the task.
-5. Open tasks, create another, or return to menu.
+Choose Me / Peer / Both, enter title, then edit a draft card in any order: title, executor,
+proposed points, deadline, effort and comment. Fields retain existing limits (title 1–200, points
+1–10000, effort 1–10080 minutes, comment 1–1500). Points and all details except title are optional.
+Only Create persists a task. Back preserves values, Menu/Cancel discard them. Deadlines use the
+creator's display timezone and end at 23:59:59; dates before today or after 2100 are rejected.
+Effort is planning information, never a score multiplier.
 
-Owner is the authenticated sender; evaluator is the other user; initial status is BACKLOG. No task
-row is created by an incomplete/cancelled draft. Estimate is planning information, never a score
-multiplier. Deadlines use the owner's personal timezone and end at 23:59:59 on the chosen date.
-Calendar supports Monday-first months and leap days; no past date or year after 2100 is selectable.
-Missing a deadline does not automatically create a penalty.
+Ordinary self tasks need the peer's approval; peer-assigned tasks need the executor's acceptance;
+shared tasks need the other creator's approval. An omitted price is supplied by the approver.
+The approver may accept the proposal, choose a final different price, skip or confirm rejection.
+Rejection cancels the task. Successful approval moves BACKLOG to TODO without earning points.
 
-Owners can edit title, deadline, estimate and comment while BACKLOG/TODO/IN_PROGRESS. Clearing optional
-fields is supported. Editing an already rated task retains its rating: changing its meaning requires
-agreement between the two participants. No rerating or user-facing hard task deletion is implemented.
+Changing title or effort after approval returns the task to BACKLOG, proposing its previous price
+and requiring the other editor's approval. Deadline/comment edits retain approval. First acceptance
+remains recorded so these edits never restore the original creator's management rights. DONE
+requires confirmed reopen before editing; CANCELLED is terminal.
+
+## Templates
+
+Templates are shared and require no approval. Either participant creates, edits or disables them.
+Defaults are English for 60 minutes / 500 points and Diploma for 60 minutes / 500 points, seeded
+idempotently without overwriting edits. A template has a title, optional effort and mandatory price.
+The catalog is paginated; a draft can also be saved as a template (deadline/comment are not copied).
+
+A template fills a draft. Self/shared tasks with unchanged title/effort/price are immediately TODO;
+peer-assigned tasks still require acceptance. Changing title, effort or price removes automatic
+approval; deadline/comment do not. Each task snapshots the template and version. Template edits
+only affect future tasks; stale or disabled selections require refreshed explicit submission.
 
 ## Rating and task states
 
-The rating queue displays one pending peer task. Presets are 100/250/500/750/1000; custom points must
-be an integer 1–10000. Skip advances with wrap-around without changing status. Successful rating
-records evaluator/time/points, moves BACKLOG → TODO, queues an owner notice and opens the next task.
-Rating alone adds no points.
+Inbox combines rating and acceptance requests. Suggested price can be accepted with one button;
+custom price uses the existing numeric limits/presets and becomes final without a counteroffer.
+The current manual rating author can change TODO/IN_PROGRESS price after old/new confirmation.
+Status is retained, the executor is notified, and no score event is created until completion.
+The same value is a no-op. Automatic template prices have no manual rating author.
 
-| From | Allowed action | Result |
+| From | Action | Result |
 | --- | --- | --- |
-| BACKLOG | Peer rates | TODO |
-| BACKLOG | Owner confirms cancellation | CANCELLED |
-| TODO | Owner starts / completes / confirms cancellation | IN_PROGRESS / DONE / CANCELLED |
-| IN_PROGRESS | Owner completes / confirms cancellation | DONE / CANCELLED |
-| DONE | Owner confirms reopen | TODO or IN_PROGRESS, original award reversed |
+| BACKLOG | Other proposal author approves | TODO |
+| BACKLOG | Confirm rejection/cancellation | CANCELLED |
+| TODO | Executor starts/completes/cancels | IN_PROGRESS / DONE / CANCELLED |
+| IN_PROGRESS | Executor returns/completes/cancels | TODO / DONE / CANCELLED |
+| TODO / IN_PROGRESS | Title/effort changes | BACKLOG awaiting other editor |
+| DONE | Confirm reopen | TODO / IN_PROGRESS, original award reversed |
 | CANCELLED | None | Terminal archive state |
 
-The service also supports IN_PROGRESS → TODO and confirmed DONE → CANCELLED; these two transitions
-have no dedicated UI button. DONE can be reached without starting first. Task filters: active,
-in progress, pending rating, completed, cancelled; lists preserve page/filter when returning from details.
+A shared task has one status, one completion timestamp and an award per participant. Either may
+Complete for us, atomically awarding full price to both. Confirmed reopen reverses both original
+awards in their original week; completion again earns a new award in its new week.
 
 ## Weekly results and history
 
@@ -103,7 +126,7 @@ at startup; changing allowed IDs transfers access and requires deliberate operat
 New rating tasks coalesce into one pending batch, default debounce five seconds. PostgreSQL allows
 at most one rating notification attempt per hour per recipient. A batch inside cooldown waits until
 eligible; an empty queue skips. The message shows the current pending count and opens the rating queue.
-Rating notifies the owner; penalty creation notifies its recipient. Routine status changes do not spam.
+Approval notifies the proposal author; rerating notifies the executor (shared: the other actor); penalty creation notifies its recipient. Routine status changes do not spam.
 
 Ambiguous sends/crashes may omit a notice rather than replay it; the menu remains the source of truth.
 Both users must start the bot before Telegram permits notices. Render Free can sleep and delay updates.
@@ -116,3 +139,18 @@ create → rate → complete → reopen; verify penalties/snapshots, stale butto
 persistence. Mocked Bot API tests are separate evidence from real phone acceptance.
 Groups, extra users, recurring tasks, attachments, automatic deadline penalties and a web dashboard
 are outside the implemented product.
+
+## Deadline visibility and manual penalties
+
+The overdue filter includes unfinished past-deadline tasks and tasks completed after their
+deadline, excluding cancelled tasks. Mine/peer/shared/assigned scopes and five-item pagination
+continue to apply; personal totals remain independent of the selected filter. Deadline and
+planned duration are both visible in list rows. Cards show the deadline in the viewer’s timezone,
+elapsed delay or fixed completion lateness, and Refresh. Date-only entry uses the final microsecond
+of the selected local day. Completed-on-time tasks do not become overdue later.
+
+Assign penalty opens the existing manual, explicitly confirmed form. A personal task preselects
+its executor; a shared task asks which participant receives the penalty. The suggested editable
+comment contains task ID/title, deadline and observed lateness. Type and amount are chosen manually;
+no automatic penalty or award change occurs when a deadline passes. Repeated confirmation remains
+operation-key protected. No new database revision is needed beyond collaborative revision 0005.

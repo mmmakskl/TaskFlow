@@ -132,10 +132,11 @@ async def test_deleted_task_during_custom_rating_keeps_score_zero(factory, setti
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/start")
     await driver.press(1001, "Задача")
+    await driver.press(1001, "Себе")
     await driver.text(1001, "Delete while rating")
-    await driver.press(1001, "Создать без деталей")
+    await driver.press(1001, "✅ Создать")
     await driver.text(1002, "/start")
-    await driver.press(1002, "Оценить")
+    await driver.press(1002, "Входящие")
     await driver.press(1002, "Другое")
     async with factory.begin() as session:
         task = await session.scalar(select(Task))
@@ -194,7 +195,7 @@ async def test_network_failure_after_done_rolls_back_and_retry_awards_once(
         await service.rate(peer, task.id, 700, task.version)
         task_id = task.id
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Задачи")
+    await driver.press(1001, "Все задачи")
     await driver.press(1001, "Network transaction")
     original = driver.api.make_request
 

@@ -2,6 +2,9 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class TaskForm(StatesGroup):
+    target = State()
+    draft = State()
+    points = State()
     title = State()
     deadline = State()
     estimate = State()
@@ -35,3 +38,7 @@ class SettingsForm(StatesGroup):
 
 class ConfirmationForm(StatesGroup):
     action = State()
+
+
+class TemplateForm(StatesGroup):
+    field = State()

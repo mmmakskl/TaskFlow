@@ -76,13 +76,20 @@ async def render(
     )
 
 
-NAVIGATION_KEYS = ("filter", "page", "types_page", "penalty_page", "results_offset")
+NAVIGATION_KEYS = (
+    "filter",
+    "page",
+    "types_page",
+    "penalty_page",
+    "results_offset",
+    "templates_page",
+)
 SCREEN_KEYS = ("message_id", "screen_text", "screen_markup", "rendered_text")
 
 
 async def reset(state: FSMContext, keep_navigation: bool = True, **data: Any) -> None:
     previous = await state.get_data()
-    keys = SCREEN_KEYS + (NAVIGATION_KEYS if keep_navigation else ())
+    keys = SCREEN_KEYS + ("keyboard_ready",) + (NAVIGATION_KEYS if keep_navigation else ())
     await state.set_state(None)
     await state.set_data({**{key: previous[key] for key in keys if key in previous}, **data})
 

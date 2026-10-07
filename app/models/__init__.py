@@ -7,6 +7,8 @@ from app.models.entities import (
     PenaltyType,
     ScoreEvent,
     Task,
+    TaskTarget,
+    TaskTemplate,
     User,
 )
 
@@ -19,5 +21,7 @@ __all__ = [
     "PenaltyType",
     "ScoreEvent",
     "Task",
+    "TaskTarget",
+    "TaskTemplate",
     "User",
 ]
