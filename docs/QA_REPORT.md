@@ -225,8 +225,8 @@ This documentation pass does not close the release decision above.
 Twenty new tests cover exact deadline boundaries, UTC/DST elapsed time, cancelled/on-time/late
 completion semantics, scoped lists, prefilled personal/shared penalties, manual confirmation,
 duplicate/stale actions and service eligibility. Final native `make check`: **689 passed in 283.66s**,
-zero skips, Ruff113 files/mypy71 modules pass. The isolated Docker test target is recorded separately
-on completion. Current candidate branch: `feat/collaborative-deadlines`.
+zero skips, Ruff113 files/mypy71 modules pass. Isolated Docker test target: **689 passed in 385.32s**, zero skips, **72% coverage**;
+Ruff, mypy and runtime dependency audit passed. No known vulnerabilities were reported. Current candidate branch: `feat/collaborative-deadlines`.
 
 A fresh production backup was restored into isolated PostgreSQL 17 and migrated0004 → 0005. Original
 columns of 55 tasks, 2 penalties, 7 penalty types, 81 audit events, 4 score events and 2 users matched their

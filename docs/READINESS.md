@@ -1,5 +1,30 @@
 # Production readiness evidence
 
+## Collaborative/deadline rollout attempt — 2026-10-07
+
+Runtime candidate `a093870ba1f57535d2466f5e528a1d741923d998` is committed locally on
+`feat/collaborative-deadlines`. Native and isolated Docker gates each passed 689 tests with zero
+skips; Docker coverage 72%, Ruff 113 files/mypy 71 modules and runtime dependency audit passed.
+The local 390 px Safari harness was visually inspected through peer overdue lists, late-completion
+cards and confirmed manual penalty creation using only synthetic fixtures.
+
+**Publication/deployment blocked by GitHub HTTP 500.** Repeated SSH and HTTPS pushes were
+rejected with `remote: Internal Server Error`; GitHub blob/contents API uploads also returned
+HTTP 500 with empty bodies. The remote feature branch was created at the previous main commit,
+but the runtime candidate was not published. PR/CI and a new Render deployment therefore did
+not run. Production remains the previous `aad58fc`/schema 0004 release.
+
+Render Auto-Deploy was temporarily set Off for the intended incompatible upgrade, then restored
+and visually verified as After CI Checks Pass when publication remained blocked. The old service
+was never suspended. No production business record was created or modified by the verification.
+
+A new private backup was restored into isolated PostgreSQL 17 and upgraded 0004 → 0005. All original
+columns of 55 tasks, 2 penalties, 7 penalty types, 81 audit events, 4 score events and 2 users matched
+their pre-upgrade fingerprints. Backup, projection receipt and deployment probes are stored
+privately under `~/.local/share/taskflow/deployment/2026-10-07/collaborative-deadlines/`.
+The candidate can be pushed and deployed with the documented maintenance sequence once GitHub
+content writes recover. New-release native Telegram/two-account acceptance remains unverified.
+
 ## Live rollout — 2026-10-07
 
 Runtime release `d783f1da1cfe5f7c22681d33e893cc375b86a7f8` (PR #4) is deployed on
