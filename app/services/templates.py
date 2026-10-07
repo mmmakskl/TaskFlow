@@ -40,6 +40,8 @@ class TaskTemplateService(AuthorizedService):
     async def validate_creator(self, template: TaskTemplate) -> None:
         if template.creator_user_id not in await self.configured_participant_ids():
             raise DomainError("Этот шаблон недоступен.")
+        if template.is_deleted:
+            raise DomainError("Шаблон удалён.")
 
     @atomic
     async def create(
@@ -97,6 +99,20 @@ class TaskTemplateService(AuthorizedService):
     async def disable(self, actor: User, template_id: int, version: int) -> TaskTemplate:
         return await self.edit(actor, template_id, version, is_active=False)
 
+    @atomic
+    async def delete(self, actor: User, template_id: int, version: int) -> TaskTemplate:
+        actor = await self.actor(actor)
+        template = await self.repo.get(TaskTemplate, template_id, lock=True)
+        await self.validate_creator(template)
+        self.repo.version(template, version)
+        old = self.snapshot(template)
+        template.is_active = False
+        template.is_deleted = True
+        template.version += 1
+        self.repo.audit(actor, template, "delete", old, self.snapshot(template))
+        await self.repo.flush()
+        return template
+
     @staticmethod
     def snapshot(template: TaskTemplate) -> dict[str, object]:
         return {
@@ -104,4 +120,5 @@ class TaskTemplateService(AuthorizedService):
             "points": template.points,
             "estimated_minutes": template.estimated_minutes,
             "is_active": template.is_active,
+            "is_deleted": template.is_deleted,
         }

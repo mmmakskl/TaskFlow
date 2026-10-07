@@ -9,7 +9,7 @@ from app.db.seed import seed
 from app.models import ScoreEvent, Task, TaskTarget, TaskTemplate, User
 from app.repositories.tasks import TaskRepository
 from app.repositories.templates import TaskTemplateRepository
-from app.services.rules import StaleAction
+from app.services.rules import DomainError, StaleAction
 from app.services.tasks import TaskService
 from app.services.templates import TaskTemplateService
 from tests.integration.test_business_migrations import alembic
@@ -617,3 +617,9 @@ async def test_edited_disabled_template_tasks_remain_visible_and_actionable(fact
         assert ready.awarded_points == old_snapshot["points"]
         assert pending.status == "TODO" and pending.rated_points == 700
         assert ready.template_snapshot == pending.template_snapshot == old_snapshot
+        await templates.delete(owner, template.id, template.version)
+        assert template.is_deleted and not template.is_active
+        assert template.id not in [row.id for row in await templates.list(owner, active_only=False)]
+        assert ready.template_snapshot == pending.template_snapshot == old_snapshot
+        with pytest.raises(DomainError, match="Шаблон удалён"):
+            await templates.view(owner, template.id)

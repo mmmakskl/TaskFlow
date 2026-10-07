@@ -162,7 +162,7 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
         for call in driver.api.calls
         if isinstance(call, SendMessage) and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
     ]
-    assert len(sends) == 2  # One UI message per authorized user.
+    assert len(sends) == 3  # Two screens for Max, one for Vika; /menu reopens at the chat bottom.
     await driver.bot.session.close()
 
 

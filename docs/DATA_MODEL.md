@@ -2,14 +2,14 @@
 
 All ten application tables are in the `taskflow` PostgreSQL schema. The Alembic revision table is
 `public.alembic_version`. Migrations own schema, constraints, indexes and immutable-event triggers.
-Current head: **0005**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
+Current head: **0006**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
 Schema separation is not a permission boundary: do not expose it through a public Data API.
 
 | Table | Responsibilities |
 | --- | --- |
 | users | Unique Telegram identity, role, name, timezone, target, rating cooldown |
 | tasks | Owner/evaluator, text, deadline, optional estimated_minutes, status, rating, awarded snapshot, lifecycle timestamps, version and operation key |
-| task_templates | Shared title, effort, fixed points, active flag, creator, version, operation and seed keys |
+| task_templates | Shared title, effort, fixed points, active/deleted flags, creator, version, operation and seed keys |
 | penalty_types | Live name/emoji/description, PER_MINUTE/FIXED/MANUAL calculation, rate, active flag, sort order, version and unique seed key |
 | penalties | Target/creator/type FKs, full type snapshots, quantity, points, comment, version, operation key and soft deletion |
 | audit_events | Actor, entity/action, old/new JSONB and timestamp; immutable |
@@ -123,3 +123,8 @@ Snapshot/version and automatic-price provenance distinguish generated tasks from
 
 Revision 0005 refuses destructive downgrade. Once collaborative data exists, old application code
 is incompatible: do not run old and new workers together; prefer forward fixes.
+
+## Template removal (revision 0006)
+
+`task_templates.is_deleted` hides a template from lists and blocks opening or reuse while retaining
+its foreign key and audit record. Existing task snapshots remain actionable and unchanged.
