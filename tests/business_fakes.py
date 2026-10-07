@@ -121,6 +121,7 @@ class MemoryTasks(MemoryRepository, TaskRepository):
                     kind="rating_pending",
                     dedupe_key=f"pending:{evaluator_id}",
                     payload={},
+                    available_at=NOW,
                 )
             )
 

@@ -16,7 +16,7 @@ Inspect Telegram getWebhookInfo privately: URL, pending_update_count and last_er
 
 Inbox pending rows retry with backoff and become failed after five attempts. Inspect the update ID and fix the cause before requeuing a specific failed row. Never bulk replay production updates: stale callbacks and side-effect delivery may have different outcomes. Processed payloads are cleared; completed inbox rows older than seven days are pruned.
 
-Notifications in `sending` after a crash are intentionally not retried because sendMessage cannot prove whether Telegram already delivered them. Failed notifications are visible in logs; users can always open pending ratings from the menu. Rating cooldown starts at send attempt, not confirmed delivery.
+Notifications in `sending` after a crash become `uncertain` after five minutes and are intentionally not replayed because sendMessage cannot prove whether Telegram already delivered them. Failed notifications are visible in logs; users can always open pending ratings from the menu. Rating cooldown starts at the reserved send attempt, not confirmed delivery. New rating batches inside cooldown wait until it expires. See [notification delivery](NOTIFICATIONS.md) for error codes, retry policy and migration 0004.
 
 ## Database and migrations
 
