@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import SetMyCommands
+from aiogram.methods import DeleteMyCommands
 from aiogram.types import Chat, Message
 
 from app.bot.callbacks.actions import Action
@@ -15,7 +15,6 @@ from app.bot.keyboards.common import button, keyboard
 from app.bot.navigation import (
     COMMANDS,
     QUICK_KEYS,
-    bottom_keyboard,
     message_destination,
     pending_valid,
     register_commands,
@@ -30,16 +29,6 @@ async def state():
     storage = MemoryStorage()
     yield FSMContext(storage, StorageKey(bot_id=1, chat_id=1001, user_id=1001))
     await storage.close()
-
-
-def test_persistent_keyboard_exact_contract():
-    markup = bottom_keyboard()
-    assert [[b.text for b in row] for row in markup.keyboard] == [
-        ["🏠 Меню", "➕ Задача"],
-        ["📋 Задачи", "📥 Входящие"],
-        ["⚡ Шаблоны", "🏆 Результаты"],
-    ]
-    assert markup.resize_keyboard and markup.is_persistent and not markup.one_time_keyboard
 
 
 @pytest.mark.parametrize("text", [*QUICK_KEYS, *(f"/{name}" for name in COMMANDS)])
@@ -123,16 +112,14 @@ async def test_scoped_registration_continues_after_failure():
     original = api.make_request
 
     async def request(bot, method, timeout=None):  # noqa: ASYNC109 - transport signature
-        if isinstance(method, SetMyCommands) and method.scope.chat_id == 1001:
+        if isinstance(method, DeleteMyCommands) and method.scope.chat_id == 1001:
             raise TelegramNetworkError(method=method, message="offline")
         return await original(bot, method, timeout)
 
     api.make_request = request
     await register_commands(bot, [1001, 1002])
     call = api.calls[-1]
-    assert isinstance(call, SetMyCommands) and call.scope.chat_id == 1002
-    assert {c.command for c in call.commands} == set(COMMANDS)
-    assert all(c.description for c in call.commands)
+    assert isinstance(call, DeleteMyCommands) and call.scope.chat_id == 1002
     await bot.session.close()
 
 

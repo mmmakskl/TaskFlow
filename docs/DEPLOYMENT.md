@@ -167,7 +167,8 @@ update with a reserved negative ID: it does not impersonate a user or send a cha
 receipt's marker must still exist after redeploy. Receipts contain counts/hashes, never task text or
 secrets. Avoid changing business records between receipts when comparing their exact fingerprints.
 
-Also send a real `/menu` from an authorized Telegram account and verify a fresh response, then inspect
+Also send a real `/start` from an authorized Telegram account and verify the Mini App launcher and
+menu button. Open `/miniapp` in Telegram and confirm dashboard loading and task mutation, then inspect
 inbox/logs/getWebhookInfo for successful delivery. An old `last_error_date` can remain after recovery;
 check pending count and whether newer updates were delivered. Synthetic HTTP checks alone do not
 prove Telegram-to-Render delivery. Recheck health/ready and existing tasks after a second deployment.

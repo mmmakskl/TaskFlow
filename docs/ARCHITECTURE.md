@@ -6,12 +6,14 @@ live in [QA_REPORT.md](QA_REPORT.md) and [READINESS.md](READINESS.md).
 ## Modules and dependencies
 
 TaskFlow is one Python application with an HTTP server and two asynchronous worker loops.
-There is no separate REST business API, JWT, Redis, scheduler service or polling process.
+The Telegram Mini App uses a small same-origin REST API authenticated with Telegram `initData`.
+There is no JWT, Redis, scheduler service or polling process.
 
 | Module | Responsibility |
 | --- | --- |
 | `app/main.py`, `app/startup.py` | App construction; production migration then Uvicorn entrypoint |
 | `app/web/application.py`, `webhook.py`, `validation.py` | Lifespan, health/readiness, secret-verified durable ingestion, webhook setup |
+| `app/web/miniapp.py`, `app/web/static/` | Telegram-authenticated Mini App API and bundled UI assets |
 | `app/bot/dispatcher.py`, `handlers/`, `middlewares/` | aiogram routing, actor binding, form orchestration and stale-input guards |
 | `app/bot/storage.py`, `render.py`, `keyboards/`, `states/`, `callbacks/` | PostgreSQL FSM, edited-message UI and callback contracts |
 | `app/services/` | Authorization, validation, mutations, results and UI presentation |
@@ -22,8 +24,10 @@ There is no separate REST business API, JWT, Redis, scheduler service or polling
 | `app/utils/`, `app/config/` | UTC/calendar/duration/text utilities, settings and log redaction |
 | `tools/` | Local UX preview and production probe; not public endpoints |
 
-Handlers orchestrate forms and call services; repositories own persistence. `UIService` builds compact
-screens but does not own scoring mutations. Service methods accept a persisted authenticated actor,
+Handlers orchestrate forms and call services; repositories own persistence. Mini App routes resolve
+the signed Telegram sender to the seeded two-user allow-list, then call the same services as bot
+handlers. They do not accept a client supplied actor identity. `UIService` builds compact screens but
+does not own scoring mutations. Service methods accept a persisted authenticated actor,
 revalidate its identity, and do not trust callback-supplied user identity.
 
 ## HTTP and Telegram update flow
@@ -41,6 +45,12 @@ revalidate its identity, and do not trust callback-supplied user identity.
 A failed update retries with bounded backoff, becoming failed after five attempts. The first failure
 can enqueue one safe error notice for an authorized private-chat sender. Done updates older than
 seven days are pruned. See [OPERATIONS.md](OPERATIONS.md) for recovery without bulk replay.
+
+The Mini App is served from `/miniapp` and `/static/`. Its `/api/miniapp/*` routes require Telegram
+Web App `initData` in the `Authorization: tma …` header. The backend verifies Telegram's HMAC
+signature, freshness and sender allow-list before opening a database session. Mini App mutations
+use the same transaction, domain services, idempotency keys and immutable score events as bot
+updates. No schema migration is required.
 
 ## Transactions and concurrency
 
@@ -88,7 +98,9 @@ See [NOTIFICATIONS.md](NOTIFICATIONS.md) for the complete state machine.
 FSM state, draft data, menu message ID and rendered screen live in `dialogs`. A new prompt changes
 its flow generation; callbacks carry entity/version or form generation rather than trusted business
 values. Confirmation checks the active FSM and stored intent. Navigation resets interrupted forms;
-Back preserves valid draft fields. `/start`, `/menu` and `/cancel` restore the menu.
+Back preserves valid draft fields. `/start` clears the old reply keyboard and opens the Mini App;
+manually typed `/menu` and `/cancel` restore the legacy inline menu. The bot command menu and
+notification action keyboards are removed.
 
 Render edits text or markup, tolerates unchanged text and replaces deleted/uneditable menu messages.
 Lists use five-item pagination; user HTML is escaped and button labels shortened. Safe DomainError

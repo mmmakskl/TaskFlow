@@ -12,6 +12,7 @@ from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
 from app.bot.render import discard_input, render, require_current, reset
 from app.bot.states.forms import ConfirmationForm
+from app.config.settings import Settings
 from app.models import User
 from app.services.rules import DomainError
 from app.services.ui import UIService
@@ -38,10 +39,12 @@ async def show(
 
 
 async def menu_command(
-    message: Message, bot: Bot, state: FSMContext, actor: User, ui: UIService
+    message: Message, bot: Bot, state: FSMContext, actor: User, settings: Settings
 ) -> None:
     await reset(state, keep_navigation=False)
-    await show(await ui.menu(actor), bot, message.chat.id, state)
+    from app.bot.navigation import launch_miniapp
+
+    await launch_miniapp(bot, actor, settings)
     await discard_input(message)
 
 
@@ -137,7 +140,7 @@ async def confirmed_action(state: FSMContext, action: Action) -> dict[str, Any]:
 
 def create_router() -> Router:
     created = Router()
-    created.message.register(menu_command, Command("start", "menu", "cancel"))
+    created.message.register(menu_command, Command("start"))
     created.callback_query.register(
         navigation,
         Action.filter(

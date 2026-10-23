@@ -177,7 +177,7 @@ def test_rerate_notification_shows_original_new_price_and_preserves_status(statu
     text, markup = notification_message(row, 0)
     assert "500 → 700" in text and "&lt;task&gt;" in text and "&lt;peer&gt;" in text
     assert ("остаётся в работе" in text) == (status == "IN_PROGRESS")
-    assert markup.inline_keyboard[0][0].callback_data.startswith("a:task:1:")
+    assert markup is None
 
 
 def test_rejection_notification_escapes_author_and_title():
@@ -191,7 +191,7 @@ def test_rejection_notification_escapes_author_and_title():
         0,
     )
     assert "отклонено" in text and "&lt;task&gt;" in text and "&lt;peer&gt;" in text
-    assert markup.inline_keyboard[0][0].callback_data.startswith("a:task:5:")
+    assert markup is None
 
 
 def test_new_partial_target_and_template_form_validation():

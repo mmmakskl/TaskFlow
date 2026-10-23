@@ -23,7 +23,7 @@ def data_for(driver, user_id, label):
 
 async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settings):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "➕ Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Сделать <план>")
@@ -48,7 +48,7 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
     create_callback = await driver.press(1001, "✅ Создать")
     await driver.press(1001, data=create_callback)
     assert "~1 ч 35 мин" in driver.screen(1001).text
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "Входящие")
     assert "План: ~1 ч 35 мин" in driver.screen(1002).text
     await driver.press(1001, "К задачам")
@@ -92,7 +92,7 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
 @pytest.mark.parametrize("bad", ["0", "10081", "abc", "-15", "1.5"])
 async def test_invalid_estimate_keeps_form(factory, settings, bad):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "➕ Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Estimate")
@@ -109,7 +109,7 @@ async def test_penalty_all_back_steps_presets_stale_confirmation_and_no_early_sa
     factory, settings
 ):
     driver = BotDriver(factory, settings)
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "⚠️ Штраф")
     await driver.press(1002, "Макс")
     await driver.press(1002, "⬅️ Назад")
@@ -146,7 +146,7 @@ async def test_penalty_all_back_steps_presets_stale_confirmation_and_no_early_sa
 
 async def test_timezone_presets_manual_input_back_and_weekly_target(factory, settings):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Настройки")
     await driver.press(1001, "Часовой пояс")
     assert "Europe/Moscow" in driver.screen(1001).text
@@ -181,7 +181,7 @@ async def test_timezone_presets_manual_input_back_and_weekly_target(factory, set
 
 async def test_type_wizard_back_skip_optional_description_and_rate_preset(factory, settings):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Настройки")
     await driver.press(1001, "Типы штрафов")
     await driver.press(1001, "Новый тип")
@@ -285,7 +285,7 @@ async def test_fixed_penalty_back_returns_to_types(factory, settings):
             rate=250,
         )
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "⚠️ Штраф")
     await driver.press(1001, "Макс")
     await driver.press(1001, "▶️")

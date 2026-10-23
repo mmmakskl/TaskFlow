@@ -69,7 +69,7 @@ async def test_penalty_outbox_snapshot_is_atomic_and_idempotent(business):
 
 
 @pytest.mark.parametrize("kind", ["rated", "penalty_created"])
-def test_notification_templates_escape_user_text_and_have_navigation(kind):
+def test_notification_templates_escape_user_text_without_action_buttons(kind):
     from app.notifications.messages import notification_message
 
     row = Notification(
@@ -86,7 +86,7 @@ def test_notification_templates_escape_user_text_and_have_navigation(kind):
     text, markup = notification_message(row, 0)
     assert "<script>" not in text and "&lt;script&gt;" in text
     assert "&lt;b&gt;Вика&lt;/b&gt;" in text
-    assert markup.inline_keyboard[0][0].callback_data
+    assert markup is None
 
 
 async def test_empty_pending_batch_is_skipped(business, monkeypatch):

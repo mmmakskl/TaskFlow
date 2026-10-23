@@ -138,13 +138,13 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
 ) -> None:
     driver = BotDriver(factory, settings)
     driver.api.expired_ack = expired_ack
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "➕ Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Купить <билеты>")
     await driver.press(1001, "✅ Создать")
     assert "&lt;билеты&gt;" in driver.screen(1001).text
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "Входящие")
     rating_callback = await driver.press(1002, "500")
     await driver.press(1002, data=rating_callback)
@@ -172,7 +172,7 @@ async def test_penalty_ui_confirmation_and_duplicate_callback(
 ) -> None:
     driver = BotDriver(factory, settings)
     driver.api.expired_ack = expired_ack
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "⚠️ Штраф")
     await driver.press(1002, "Макс")
     await driver.press(1002, "Instagram")
@@ -203,7 +203,7 @@ async def test_unauthorized_telegram_user_denied_without_creating_user(
 
 async def test_stale_penalty_form_cannot_select_new_draft(factory, settings: Settings) -> None:
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "⚠️ Штраф")
     await driver.press(1001, "Макс")
     old = next(
@@ -228,7 +228,7 @@ async def test_live_penalty_configuration_and_personal_settings(
     from app.models import PenaltyType
 
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Настройки")
     await driver.press(1001, "Типы штрафов")
     await driver.press(1001, "Instagram")
@@ -246,7 +246,7 @@ async def test_live_penalty_configuration_and_personal_settings(
 
 async def test_calendar_comment_edit_and_custom_rating_reopen(factory, settings: Settings) -> None:
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "➕ Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Проверить календарь")
@@ -257,7 +257,7 @@ async def test_calendar_comment_edit_and_custom_rating_reopen(factory, settings:
     await driver.press(1001, "Добавить комментарий")
     await driver.text(1001, "<Комментарий>")
     await driver.press(1001, "✅ Создать")
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "Входящие")
     await driver.press(1002, "Другое")
     await driver.text(1002, "800")
@@ -291,7 +291,7 @@ async def test_uvicorn_process_restart_preserves_database(factory, settings: Set
         "ENVIRONMENT": "test",
     }
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "➕ Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Persistent task")
@@ -346,7 +346,7 @@ async def test_create_manual_penalty_type_and_use_without_restart(
     from app.models import PenaltyType
 
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Настройки")
     await driver.press(1001, "Типы штрафов")
     await driver.press(1001, "Новый тип")
@@ -378,7 +378,7 @@ async def test_unexpected_handler_error_retries_and_notifies_once(
     from unittest.mock import AsyncMock
 
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     payload = {
         "update_id": 999,
         "message": {
