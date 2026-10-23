@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f4f7fb">
+  <title>TaskFlow</title>
+  <link rel="stylesheet" href="/static/miniapp.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <div class="brand"><div class="logo">✦</div>taskflow</div>
+      <div class="top-actions">
+        <button class="theme-toggle" id="themeToggle" aria-label="Переключить тему" onclick="toggleTheme()">☾</button>
+        <button class="profile" id="profile"><span class="avatar">👤</span><span id="profileName">Участник</span></button>
+      </div>
+    </header>
+    <main id="view" class="content"></main>
+    <nav class="bottom" id="nav"></nav>
+  </div>
+  <div class="modal-wrap" id="modalWrap" onclick="if(event.target===this)closeModal()">
+    <section class="modal" id="modal"></section>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="https://telegram.org/js/telegram-web-app.js?64"></script>
+  <script src="/static/miniapp.js"></script>
+</body>
+</html>

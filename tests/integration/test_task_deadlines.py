@@ -85,7 +85,7 @@ async def test_peer_overdue_manual_penalty_prefilled_confirmed_and_idempotent(
         )
         task_id, recipient = task.id, peer.id
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Все задачи")
     await driver.press(1001, "Вика")
     await driver.press(1001, "Просроченные")
@@ -150,7 +150,7 @@ async def test_forged_future_task_penalty_cannot_open_form(factory, settings, cl
         )
         action = Action(name="task_penalty", entity=task.id, version=task.version).pack()
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, data=action)
     assert await session_count(factory) == 0
     await driver.bot.session.close()

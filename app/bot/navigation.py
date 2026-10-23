@@ -8,13 +8,13 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
-    BotCommand,
     BotCommandScopeChat,
     CallbackQuery,
+    InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     Message,
-    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    WebAppInfo,
 )
 from pydantic import ValidationError
 
@@ -23,6 +23,7 @@ from app.bot.callbacks.actions import Action
 from app.bot.keyboards.common import button, keyboard
 from app.bot.middlewares.interaction import FORM_ACTIONS, NAVIGATION, NEW_FORMS, draft_valid
 from app.bot.render import discard_input, render, reset
+from app.config.settings import Settings
 from app.models import User
 from app.services.rules import DomainError
 from app.services.ui import UIService
@@ -36,7 +37,7 @@ QUICK_KEYS = {
     "🏆 Результаты": "results",
 }
 COMMANDS = {
-    "start": "Открыть меню",
+    "start": "Открыть TaskFlow",
     "menu": "Меню",
     "new": "Новая задача",
     "tasks": "Все задачи",
@@ -46,8 +47,8 @@ COMMANDS = {
     "cancel": "Отменить форму",
 }
 DESTINATIONS = {
-    "menu": Action(name="menu"),
     "start": Action(name="menu"),
+    "menu": Action(name="menu"),
     "cancel": Action(name="menu"),
     "new": Action(name="new"),
     "tasks": Action(name="list", value="mine_all"),
@@ -62,36 +63,13 @@ def fresh_nonce(previous: int | None = None) -> int:
     return nonce if nonce != previous else nonce % 2147483647 + 1
 
 
-def bottom_keyboard() -> ReplyKeyboardMarkup:
-    labels = list(QUICK_KEYS)
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=text) for text in labels[i : i + 2]] for i in (0, 2, 4)],
-        resize_keyboard=True,
-        is_persistent=True,
-        one_time_keyboard=False,
-    )
-
-
 async def register_commands(bot: Bot, chat_ids: tuple[int, ...] | list[int] | set[int]) -> None:
     for chat_id in chat_ids:
         try:
-            await bot.set_my_commands(
-                commands=[
-                    BotCommand(command=name, description=text) for name, text in COMMANDS.items()
-                ],
-                scope=BotCommandScopeChat(chat_id=chat_id),
-            )
+            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=chat_id))
         except (TelegramAPIError, TelegramNetworkError):
             # Registration is a convenience; do not log Telegram errors containing tokens.
             logging.getLogger(__name__).warning("command_registration_failed")
-
-
-async def ensure_keyboard(bot: Bot, actor: User, state: FSMContext, force: bool = False) -> None:
-    if force or not (await state.get_data()).get("keyboard_ready"):
-        await bot.send_message(
-            actor.telegram_id, "Быстрые действия — внизу экрана.", reply_markup=bottom_keyboard()
-        )
-        await state.update_data(keyboard_ready=True)
 
 
 async def message_destination(message: Message, bot: Bot) -> str | None:
@@ -107,6 +85,31 @@ async def message_destination(message: Message, bot: Bot) -> str | None:
         if mention.lower() != (identity.username or "").lower():
             return None
     return command if command in COMMANDS else None
+
+
+async def launch_miniapp(bot: Bot, actor: User, settings: Settings) -> None:
+    """Clear a previously installed reply keyboard and show a one-time app launch CTA."""
+    await bot.send_message(
+        actor.telegram_id,
+        "TaskFlow теперь открывается в приложении. Старые кнопки удалены.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    if not settings.webhook_base_url:
+        await bot.send_message(
+            actor.telegram_id,
+            "Для локального запуска задай WEBHOOK_BASE_URL с HTTPS адресом Mini App.",
+        )
+        return
+    url = f"{settings.webhook_base_url.rstrip('/')}/miniapp"
+    await bot.send_message(
+        actor.telegram_id,
+        "Задачи, согласования и звёзды — в одном месте.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Открыть TaskFlow", web_app=WebAppInfo(url=url))]
+            ]
+        ),
+    )
 
 
 def pending_valid(current: str | None, pending: Any) -> bool:
@@ -268,15 +271,13 @@ async def handle_navigation(event: Message | CallbackQuery, data: dict[str, Any]
     saved = await state.get_data()
     pending = saved.get("nav_pending")
     command = await message_destination(event, bot) if isinstance(event, Message) else None
-    if command in {"start", "menu", "cancel"}:
-        if command == "start":
-            await register_commands(bot, [actor.telegram_id])
-        await ensure_keyboard(
-            bot,
-            actor,
-            state,
-            force=command == "start" or (getattr(event, "text", "") or "").startswith("/menu"),
-        )
+    if command == "start":
+        await reset(state, keep_navigation=False)
+        await launch_miniapp(bot, actor, data["settings"])
+        if isinstance(event, Message):
+            await discard_input(event)
+        return True
+    if command in {"menu", "cancel"}:
         await destination_screen(DESTINATIONS[command], bot, actor, state, ui)
         if isinstance(event, Message):
             await discard_input(event)
@@ -292,7 +293,6 @@ async def handle_navigation(event: Message | CallbackQuery, data: dict[str, Any]
     if not draft_valid(current, saved):
         return False  # Existing corruption recovery owns this case.
     if command:
-        await ensure_keyboard(bot, actor, state)
         if current:
             await interrupt(bot, actor, state, DESTINATIONS[command])
         else:

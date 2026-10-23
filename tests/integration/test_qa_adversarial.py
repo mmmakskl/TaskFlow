@@ -130,12 +130,12 @@ async def test_both_participants_auth_and_cross_chat_spoof_are_isolated(factory,
 
 async def test_deleted_task_during_custom_rating_keeps_score_zero(factory, settings):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.press(1001, "Задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Delete while rating")
     await driver.press(1001, "✅ Создать")
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.press(1002, "Входящие")
     await driver.press(1002, "Другое")
     async with factory.begin() as session:

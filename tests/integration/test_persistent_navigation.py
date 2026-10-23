@@ -3,15 +3,13 @@
 from copy import deepcopy
 
 import pytest
-from aiogram.exceptions import TelegramNetworkError
 from aiogram.methods import SendMessage, SetMyCommands
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 
 from app.bot.callbacks.actions import Action
 from app.bot.dispatcher import create_dispatcher
-from app.bot.navigation import COMMANDS
 from app.models import Penalty, ScoreEvent, Task, TaskTemplate
 from app.models.entities import Dialog
 from app.web.application import create_app
@@ -28,7 +26,7 @@ async def dialog(driver, user=1001):
 
 
 async def enter(driver, kind):
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     if kind.startswith("task"):
         await driver.text(1001, "/new")
         if kind != "task-choice":
@@ -79,7 +77,7 @@ async def enter(driver, kind):
 )
 async def test_every_quick_action_and_command_destination(factory, settings, text, expected):
     driver = BotDriver(factory, settings)
-    await driver.text(1001, "/start")
+    await driver.text(1001, "/menu")
     await driver.text(1001, text)
     assert expected.lower() in driver.screen(1001).text.lower()
     carriers = [
@@ -87,9 +85,9 @@ async def test_every_quick_action_and_command_destination(factory, settings, tex
         for c in driver.api.calls
         if isinstance(c, SendMessage) and isinstance(c.reply_markup, ReplyKeyboardMarkup)
     ]
-    assert len(carriers) == (2 if text == "/menu" else 1)
+    assert not carriers
     state, data = await dialog(driver)
-    assert data["message_id"] != 101  # Carrier is never the editable inline UI.
+    assert isinstance(data["message_id"], int)
     assert "nav_pending" not in data
     assert bool(state) == (text in {"/new", "➕ Задача"})
     await driver.bot.session.close()
@@ -222,7 +220,7 @@ async def test_direct_exit_discards_even_corrupt_draft(factory, settings, exit_t
         row = await session.scalar(select(Dialog))
         row.data = {**row.data, "flow": "broken", "nav_pending": []}
     await driver.text(1001, exit_text)
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert ("WEBHOOK_BASE_URL" if exit_text == "/start" else "НЕДЕЛЯ") in driver.screen(1001).text
     state, data = await dialog(driver)
     assert state is None and "title" not in data and "nav_pending" not in data
     await driver.bot.session.close()
@@ -232,7 +230,7 @@ async def test_confirmation_stay_keeps_entity_version_and_new_nonce_mutates_once
     driver = BotDriver(factory, settings)
     await enter(driver, "task-draft")
     await driver.press(1001, "✅ Создать")
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.text(1002, "/inbox")
     await driver.press(1002, "Отклонить")
     current, original = await dialog(driver, 1002)
@@ -298,29 +296,25 @@ async def test_notification_navigation_during_draft_retains_current_screen_until
     await driver.bot.session.close()
 
 
-async def test_scoped_command_registration_failures_do_not_block_readiness_or_start(
-    factory, settings
-):
+async def test_start_opens_miniapp_without_command_suggestions(factory, settings):
+    settings = settings.model_copy(update={"webhook_base_url": "https://taskflow.example"})
     driver = BotDriver(factory, settings)
-    attempted = []
-    original = driver.api.make_request
-
-    async def request(bot, method, timeout=None):  # noqa: ASYNC109 - transport signature
-        if isinstance(method, SetMyCommands):
-            attempted.append(method)
-            raise TelegramNetworkError(method=method, message="offline")
-        return await original(bot, method, timeout)
-
-    driver.api.make_request = request
     app = create_app(settings, bot=driver.bot, session_factory=factory, workers=False)
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/ready")).status_code == 200
         await driver.text(1001, "/start")
-        assert "НЕДЕЛЯ" in driver.screen(1001).text
-    assert {c.scope.chat_id for c in attempted} == {1001, 1002}
-    assert len(attempted) == 3
-    assert all({c.command for c in request.commands} == set(COMMANDS) for request in attempted)
+        launcher = next(
+            c.reply_markup
+            for c in reversed(driver.api.calls)
+            if isinstance(c, SendMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
+        )
+        assert launcher.inline_keyboard[0][0].web_app.url == "https://taskflow.example/miniapp"
+        assert any(
+            isinstance(getattr(c, "reply_markup", None), ReplyKeyboardRemove)
+            for c in driver.api.calls
+        )
+    assert not any(isinstance(c, SetMyCommands) for c in driver.api.calls)
 
 
 @pytest.mark.parametrize(
@@ -366,7 +360,7 @@ async def test_latest_destination_replaces_prompt_without_nesting_or_setup_spam(
         for c in driver.api.calls
         if isinstance(c, SendMessage) and isinstance(c.reply_markup, ReplyKeyboardMarkup)
     ]
-    assert len(carriers) == 1
+    assert not carriers
     await driver.bot.session.close()
 
 
@@ -404,7 +398,7 @@ async def test_rerating_input_and_confirmation_restore_then_submit_actual_price(
     driver = BotDriver(factory, settings)
     await enter(driver, "task-draft")
     await driver.press(1001, "✅ Создать")
-    await driver.text(1002, "/start")
+    await driver.text(1002, "/menu")
     await driver.text(1002, "/inbox")
     await driver.press(1002, "500")
     await driver.text(1002, "/tasks")
@@ -451,9 +445,9 @@ async def test_menu_reopens_at_bottom_then_other_commands_edit_latest_screen(fac
     inline = [
         c
         for c in driver.api.calls
-        if isinstance(c, SendMessage) and not isinstance(c.reply_markup, ReplyKeyboardMarkup)
+        if isinstance(c, SendMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
     ]
-    assert len(carriers) == 3 and len(inline) == 4
+    assert not carriers and len(inline) == 4
     await driver.bot.session.close()
 
 

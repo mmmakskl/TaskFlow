@@ -29,9 +29,16 @@ async def send_notification(
     status, error_code, retry_after = "sent", None, None
     try:
         message, markup = notification_message(row, count)
-        await bot.send_message(
-            user.telegram_id, message, reply_markup=markup, parse_mode="HTML", request_timeout=20
-        )
+        if markup is None:
+            await bot.send_message(user.telegram_id, message, parse_mode="HTML", request_timeout=20)
+        else:
+            await bot.send_message(
+                user.telegram_id,
+                message,
+                reply_markup=markup,
+                parse_mode="HTML",
+                request_timeout=20,
+            )
     except TelegramRetryAfter as exc:
         # Telegram explicitly rejected this request: retrying it cannot duplicate delivery.
         status, error_code = "failed", "rate_limited"

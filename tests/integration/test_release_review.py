@@ -4,8 +4,8 @@ import httpx
 import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.methods import SendMessage, SetWebhook
-from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
+from aiogram.methods import DeleteMyCommands, SendMessage, SetChatMenuButton, SetWebhook
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.bot.dispatcher import create_dispatcher
@@ -88,14 +88,17 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             assert registrations[0].url == "https://release.example.test/telegram/webhook"
             assert registrations[0].secret_token == production.webhook_secret.get_secret_value()
             menus = [call for call in api.calls if isinstance(call, SendMessage)]
-            carriers = [
-                call for call in menus if isinstance(call.reply_markup, ReplyKeyboardMarkup)
-            ]
             dashboards = [
                 call for call in menus if isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
-            assert len(menus) == 2
-            assert len(carriers) == 1 and len(dashboards) == 1
+            app_buttons = [call for call in api.calls if isinstance(call, SetChatMenuButton)]
+            assert {call.chat_id for call in app_buttons} == {1001, 1002}
+            assert all(
+                call.menu_button.web_app.url == "https://release.example.test/miniapp"
+                for call in app_buttons
+            )
+            assert len([call for call in api.calls if isinstance(call, DeleteMyCommands)]) == 3
+            assert len(menus) == 1 and len(dashboards) == 1
             assert "НЕДЕЛЯ" in dashboards[0].text
             assert all(call.chat_id == 1001 for call in menus)
 

@@ -3,24 +3,29 @@ import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.dispatcher import create_dispatcher
-from app.bot.navigation import register_commands
 from app.config.logging import configure_logging
 from app.config.settings import Settings
 from app.db.seed import seed
 from app.db.session import database
 from app.models import Inbox
 from app.notifications.worker import run_workers
+from app.services.rules import DomainError, StaleAction
+from app.web.miniapp import configure_miniapp_menu
+from app.web.miniapp import create_router as create_miniapp_router
 from app.web.validation import validate_payload
 from app.web.webhook import configure_webhook
 
@@ -51,7 +56,8 @@ def create_app(
                 await seed(session, settings)
             if settings.register_webhook:
                 await configure_webhook(telegram, settings)
-            await register_commands(telegram, list(settings.authorized_ids))
+            if settings.register_webhook and settings.webhook_base_url:
+                await configure_miniapp_menu(telegram, settings)
             task = (
                 asyncio.create_task(run_workers(factory, dp, telegram, settings, stop))
                 if workers
@@ -85,6 +91,17 @@ def create_app(
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ready = False
     app.state.worker_task = None
+    app.include_router(create_miniapp_router(settings, factory))
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).parent / "static"),
+        name="miniapp-static",
+    )
+
+    @app.exception_handler(DomainError)
+    async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
+        status = 409 if isinstance(exc, StaleAction) else 422
+        return JSONResponse(status_code=status, content={"detail": str(exc)})
 
     @app.get("/health")
     async def health() -> dict[str, str]:

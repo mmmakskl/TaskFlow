@@ -14,10 +14,12 @@ Either participant can assign penalties and maintain shared penalty types and ta
 
 ## Dashboard and navigation
 
-The dashboard shows both weekly results, pending approvals and active tasks. A persistent bottom
-keyboard opens Menu, New task, Tasks, Inbox, Templates and Results. Matching commands are `/menu`,
-`/new`, `/tasks`, `/inbox`, `/templates`, `/results`; `/start` and `/cancel` remain available.
-Menu/cancel discard the current form. Other quick navigation during an unfinished form requires
+The Telegram Mini App dashboard shows both weekly results, pending approvals and active tasks. It
+provides task creation, editing, cancellation, approval, ratings, templates, penalties, settings and
+score history in a responsive light/dark interface. The Telegram menu button opens the app. `/start`
+sends a one-time launcher and clears any old persistent reply keyboard. Manually typed `/menu` and
+`/cancel` still restore the legacy inline menu. Bot command suggestions and notification action
+buttons are removed. Menu/cancel discard the current form. Other quick navigation during an unfinished form requires
 Leave and discard / Stay, preserving inputs on Stay. Context actions remain inline in one edited
 screen. Shared tasks also have a separate dashboard entry.
 
