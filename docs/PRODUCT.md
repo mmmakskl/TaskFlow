@@ -83,6 +83,28 @@ A shared task has one status, one completion timestamp and an award per particip
 Complete for us, atomically awarding full price to both. Confirmed reopen reverses both original
 awards in their original week; completion again earns a new award in its new week.
 
+## Epics, subtasks and linked tasks
+
+Any top-level task may be used as an epic. Its manager can create new subtasks or attach an existing
+root task; parent and child share the epic's executor choice. Each child still has its own proposal,
+approval and reward, and attaching an existing child preserves its price and score history. Children
+cannot contain children. The epic detail shows progress, the sum of agreed child prices and its own
+separate bonus price. Pending proposals are excluded from the sum; a shared child's price is counted
+once and the UI labels its per-person payout. The parent bonus follows the ordinary approval flow.
+
+An epic can be completed only after all attached children are DONE. A cancelled child blocks the
+epic until detached. To reopen a completed child, first reopen the epic; its bonus is reversed in its
+original week, then the child can be reopened and its own award reversed. Reopening a blocker does
+not reopen already completed dependent tasks.
+
+Tasks can also be linked as RELATED or DEPENDS_ON. RELATED is informational. A dependency requires
+the selected blocker to be DONE before the dependent task can be completed. Dependency cycles are
+rejected. Linked tasks appear in details with blockers and their current statuses.
+
+Task lists show top-level items with their subtasks inside epic details. All (the default) excludes
+completed tasks; Done contains completed items and Archive contains cancelled items. Completing a
+subtask updates epic progress without moving the parent into a completed state.
+
 ## Weekly results and history
 
 Default target is 10000 per user. Result = completed awarded task points − penalties; negative

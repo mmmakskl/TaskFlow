@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.engine import make_url
 
-from app.models import AuditEvent, Penalty, PenaltyType, ScoreEvent, Task
+from app.models import AuditEvent, Penalty, PenaltyType, ScoreEvent, Task, TaskLink, TaskTarget
 from app.repositories.tasks import TaskRepository
 from app.services.penalties import PenaltyService
 from app.services.tasks import TaskService
@@ -36,6 +36,19 @@ async def test_reversible_guards_preserve_all_data(factory, settings):
         task = await service.create(owner, "Retained", "migration", estimate=30)
         await service.rate(peer, task.id, 500, task.version)
         await service.change_status(owner, task.id, "DONE", task.version)
+        parent = await service.create(owner, "Epic", "migration-epic")
+        await service.rate(peer, parent.id, 900, parent.version)
+        await service.create(
+            owner,
+            "Subtask",
+            "migration-subtask",
+            target=TaskTarget.SELF,
+            parent_task_id=parent.id,
+            parent_version=parent.version,
+        )
+        await service.create_link(
+            owner, parent.id, task.id, "RELATED", parent.version, task.version, "migration-link"
+        )
         penalties = PenaltyService(repo, settings)
         kind = await session.scalar(select(PenaltyType).where(PenaltyType.seed_key == "instagram"))
         await penalties.create(
@@ -46,19 +59,19 @@ async def test_reversible_guards_preserve_all_data(factory, settings):
         async with factory() as session:
             return [
                 list((await session.execute(select(model.__table__).order_by(model.id))).mappings())
-                for model in (Task, Penalty, ScoreEvent, AuditEvent)
+                for model in (Task, TaskLink, Penalty, ScoreEvent, AuditEvent)
             ]
 
     before = await snapshot()
     code, output = await alembic(settings, "downgrade", "0004")
-    assert code != 0 and "no destructive downgrade" in output
+    assert code != 0 and ("no destructive downgrade" in output or "Task links exist" in output)
     assert await snapshot() == before
     code, output = await alembic(settings, "upgrade", "head")
     assert code == 0, output
     assert await snapshot() == before
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0007"
         )
     code, output = await alembic(settings, "check")
     assert code == 0, output
@@ -69,7 +82,7 @@ async def test_destructive_downgrades_refused_without_data_loss(factory, setting
     assert code != 0 and "RuntimeError" in output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0007"
         )
         assert await session.scalar(select(func.count(PenaltyType.id))) == 7
     assert (await alembic(settings, "upgrade", "head"))[0] == 0
@@ -86,14 +99,14 @@ async def test_concurrent_empty_database_migrations(factory, settings):
         assert code == 0, output
     async with factory() as session:
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0006"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0007"
         )
         assert await session.scalar(select(func.count(Task.id))) == 0
         assert set(
             await session.scalars(
                 text("SELECT tablename FROM pg_tables WHERE schemaname='taskflow'")
             )
-        ) >= {"users", "tasks", "penalty_types", "penalties", "audit_events"}
+        ) >= {"users", "tasks", "task_links", "penalty_types", "penalties", "audit_events"}
 
 
 async def test_invalid_legacy_data_aborts_guards_without_rewriting_rows(factory, settings):

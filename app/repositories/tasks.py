@@ -1,9 +1,12 @@
+from __future__ import annotations
+
+import builtins
 from dataclasses import dataclass
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models import ScoreEvent, Task, TaskTemplate, User
+from app.models import AuditEvent, ScoreEvent, Task, TaskLink, TaskTemplate, User
 from app.repositories.base import Repository
 from app.services.rules import DomainError
 from app.utils.time import utcnow
@@ -22,13 +25,13 @@ class TaskSummary:
 
 
 FILTERS = {
-    "all": ("BACKLOG", "TODO", "IN_PROGRESS", "DONE", "CANCELLED"),
+    "all": ("BACKLOG", "TODO", "IN_PROGRESS"),
     "active": ("BACKLOG", "TODO", "IN_PROGRESS"),
     "work": ("IN_PROGRESS",),
     "backlog": ("BACKLOG",),
     "done": ("DONE",),
     "archive": ("CANCELLED",),
-    "overdue": ("BACKLOG", "TODO", "IN_PROGRESS", "DONE"),
+    "overdue": ("BACKLOG", "TODO", "IN_PROGRESS"),
 }
 
 
@@ -53,6 +56,8 @@ class TaskRepository(Repository):
             Task.status.in_(statuses),
             self.visible(),
         )
+        if not pending:
+            conditions += (Task.parent_task_id.is_(None),)
         if filter_name == "overdue" and not pending:
             conditions += (
                 Task.deadline.is_not(None),
@@ -68,6 +73,66 @@ class TaskRepository(Repository):
             select(Task).where(*conditions).order_by(Task.id.desc()).offset(page * 5).limit(5)
         )
         return list(rows), count
+
+    async def children(self, parent_id: int, *, lock: bool = False) -> builtins.list[Task]:
+        query = (
+            select(Task)
+            .where(Task.parent_task_id == parent_id, Task.deleted_at.is_(None))
+            .order_by(Task.id)
+        )
+        if lock:
+            query = query.with_for_update()
+        return list(await self.session.scalars(query))
+
+    async def links_for(self, task_id: int) -> builtins.list[TaskLink]:
+        return list(
+            await self.session.scalars(
+                select(TaskLink)
+                .where(
+                    TaskLink.removed_at.is_(None),
+                    (TaskLink.task_a_id == task_id) | (TaskLink.task_b_id == task_id),
+                )
+                .order_by(TaskLink.id)
+            )
+        )
+
+    async def blockers(self, task_id: int) -> builtins.list[Task]:
+        return list(
+            await self.session.scalars(
+                select(Task)
+                .join(TaskLink, TaskLink.task_a_id == Task.id)
+                .where(
+                    TaskLink.task_b_id == task_id,
+                    TaskLink.kind == "DEPENDS_ON",
+                    TaskLink.removed_at.is_(None),
+                )
+                .order_by(Task.id)
+            )
+        )
+
+    async def active_dependency_edges(self) -> builtins.list[tuple[int, int]]:
+        rows = await self.session.execute(
+            select(TaskLink.task_a_id, TaskLink.task_b_id).where(
+                TaskLink.kind == "DEPENDS_ON", TaskLink.removed_at.is_(None)
+            )
+        )
+        edges = [(int(blocker), int(dependent)) for blocker, dependent in rows]
+        hierarchy = await self.session.execute(
+            select(Task.id, Task.parent_task_id).where(Task.parent_task_id.is_not(None))
+        )
+        edges.extend((int(child_id), int(parent_id or 0)) for child_id, parent_id in hierarchy)
+        return edges
+
+    async def link_by_operation(self, key: str) -> TaskLink | None:
+        return await self.session.scalar(select(TaskLink).where(TaskLink.operation_key == key))
+
+    async def graph_operation(self, key: str) -> AuditEvent | None:
+        return await self.session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.new_data["operation_key"].astext == key)
+            .order_by(AuditEvent.id)
+            .limit(1)
+        )
 
     @staticmethod
     def visible() -> ColumnElement[bool]:

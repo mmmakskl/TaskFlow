@@ -2,13 +2,13 @@ from datetime import timedelta
 
 import pytest
 
-from app.models import AuditEvent, Notification, ScoreEvent, Task, User
+from app.models import AuditEvent, Notification, ScoreEvent, Task, TaskTarget, User
 from app.services.rules import DomainError, StaleAction
 from tests.business_fakes import NOW
 
 
-async def rated(business, points=500):
-    task = await business.tasks.create(business.max, " Task ", "create")
+async def rated(business, points=500, key="create"):
+    task = await business.tasks.create(business.max, " Task ", key)
     await business.tasks.rate(business.vika, task.id, points, task.version)
     return task
 
@@ -257,3 +257,155 @@ async def test_empty_edit_rejected(business):
     task = await rated(business)
     with pytest.raises(DomainError):
         await business.tasks.edit(business.max, task.id, task.version)
+
+
+async def test_parent_cannot_complete_until_every_child_is_done(business):
+    parent = await rated(business, 1000, "parent")
+    first = await rated(business, 200, "first")
+    second = await rated(business, 300, "second")
+    first.parent_task_id = parent.id
+    second.parent_task_id = parent.id
+
+    with pytest.raises(DomainError, match="подзадач"):
+        await business.tasks.change_status(business.max, parent.id, "DONE", parent.version)
+
+    await business.tasks.change_status(business.max, first.id, "DONE", first.version)
+    await business.tasks.change_status(business.max, second.id, "DONE", second.version)
+    await business.tasks.change_status(business.max, parent.id, "DONE", parent.version)
+    awards = [event for event in business.session.of(ScoreEvent) if event.points > 0]
+    assert sorted(event.points for event in awards) == [200, 300, 1000]
+
+
+async def test_done_child_requires_reopening_parent_first(business):
+    parent = await rated(business, 1000, "parent")
+    child = await rated(business, 200, "child")
+    child.parent_task_id = parent.id
+    await business.tasks.change_status(business.max, child.id, "DONE", child.version)
+    await business.tasks.change_status(business.max, parent.id, "DONE", parent.version)
+
+    with pytest.raises(DomainError, match="родительскую задачу"):
+        await business.tasks.change_status(business.max, child.id, "TODO", child.version, True)
+
+
+async def test_default_task_filter_excludes_completed_tasks():
+    from app.repositories.tasks import FILTERS
+
+    assert "DONE" not in FILTERS["all"]
+    assert FILTERS["done"] == ("DONE",)
+
+
+async def test_attach_existing_subtask_is_versioned_and_idempotent(business):
+    parent = await rated(business, 1000, "parent")
+    child = await rated(business, 250, "child")
+    parent_version, child_version = parent.version, child.version
+
+    attached = await business.tasks.attach_subtask(
+        business.max, parent.id, child.id, parent_version, child_version, "attach"
+    )
+    assert attached.parent_task_id == parent.id
+    assert parent.version == parent_version + 1 and child.version == child_version + 1
+    assert child.rated_points == 250 and child.status == "TODO"
+
+    repeated = await business.tasks.attach_subtask(
+        business.max, parent.id, child.id, parent_version, child_version, "attach"
+    )
+    assert repeated is child and parent.version == parent_version + 1
+    with pytest.raises(DomainError, match="Идентификатор операции"):
+        await business.tasks.attach_subtask(
+            business.vika, parent.id, child.id, parent_version, child_version, "attach"
+        )
+
+
+async def test_create_subtask_inherits_epic_assignment_and_updates_parent(business):
+    parent = await rated(business, 1000, "parent")
+    parent_version = parent.version
+    child = await business.tasks.create(
+        business.max,
+        "Child",
+        "child",
+        target=TaskTarget.SELF,
+        parent_task_id=parent.id,
+        parent_version=parent_version,
+    )
+
+    assert child.parent_task_id == parent.id
+    assert child.participant_user_ids == parent.participant_user_ids
+    assert parent.version == parent_version + 1
+
+
+async def test_create_subtask_rejects_assignment_mismatch(business):
+    parent = await rated(business, 1000, "parent")
+    parent_version = parent.version
+    with pytest.raises(DomainError, match="состав участников эпика"):
+        await business.tasks.create(
+            business.max,
+            "Child",
+            "child",
+            target=TaskTarget.PEER,
+            parent_task_id=parent.id,
+            parent_version=parent_version,
+        )
+
+    assert parent.version == parent_version
+    assert len(business.session.of(Task)) == 1
+
+
+async def test_detaching_subtask_preserves_price_and_history(business):
+    parent = await rated(business, 1000, "parent")
+    child = await rated(business, 250, "child")
+    await business.tasks.attach_subtask(
+        business.max, parent.id, child.id, parent.version, child.version, "attach"
+    )
+
+    detached = await business.tasks.detach_subtask(
+        business.max, parent.id, child.id, parent.version, child.version, "detach"
+    )
+    assert detached.parent_task_id is None
+    assert child.rated_points == 250 and child.status == "TODO"
+
+
+async def test_dependencies_block_completion_and_reject_cycles(business):
+    blocker = await rated(business, 200, "blocker")
+    dependent = await rated(business, 300, "dependent")
+    link = await business.tasks.create_link(
+        business.max,
+        dependent.id,
+        blocker.id,
+        "DEPENDS_ON",
+        dependent.version,
+        blocker.version,
+        "dependency",
+    )
+    assert (link.task_a_id, link.task_b_id) == (blocker.id, dependent.id)
+    with pytest.raises(DomainError, match="блокирующую"):
+        await business.tasks.change_status(business.max, dependent.id, "DONE", dependent.version)
+
+    with pytest.raises(DomainError, match="цикл"):
+        await business.tasks.create_link(
+            business.max,
+            blocker.id,
+            dependent.id,
+            "DEPENDS_ON",
+            blocker.version,
+            dependent.version,
+            "cycle",
+        )
+
+
+async def test_dependency_link_removal_is_audited_and_idempotent(business):
+    blocker = await rated(business, 200, "blocker")
+    dependent = await rated(business, 300, "dependent")
+    link = await business.tasks.create_link(
+        business.max,
+        dependent.id,
+        blocker.id,
+        "DEPENDS_ON",
+        dependent.version,
+        blocker.version,
+        "dependency",
+    )
+
+    removed = await business.tasks.remove_link(business.max, link.id, link.version, "remove")
+    assert removed.removed_at == NOW and removed.version == 2
+    repeated = await business.tasks.remove_link(business.max, link.id, link.version, "remove")
+    assert repeated is removed and removed.version == 2

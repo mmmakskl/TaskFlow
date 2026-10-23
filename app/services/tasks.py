@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 
 from app.config.settings import Settings
-from app.models import Notification, ScoreEvent, Task, TaskTarget, TaskTemplate, User
+from app.models import Notification, ScoreEvent, Task, TaskLink, TaskTarget, TaskTemplate, User
 from app.repositories.tasks import TaskRepository
 from app.services.base import AuthorizedService
 from app.services.deadlines import deadline_delay
@@ -80,6 +80,8 @@ class TaskService(AuthorizedService):
         proposed_points: int | None = None,
         template_id: int | None = None,
         template_version: int | None = None,
+        parent_task_id: int | None = None,
+        parent_version: int | None = None,
     ) -> Task:
         actor = await self.actor(actor)
         key = operation_key(key)
@@ -97,10 +99,36 @@ class TaskService(AuthorizedService):
             raise DomainError("Дедлайн должен включать часовой пояс.")
         allowed = await self.configured_participant_ids()
         peer = await self.user_repo.peer(actor)
+        parent = None
+        if parent_task_id is not None:
+            await self.repo.operation_lock("task-graph")
+            parent = await self.repo.get(Task, parent_task_id, lock=True)
+            await self.validate_participants(parent)
+            if (
+                parent.deleted_at
+                or parent.status in ("DONE", "CANCELLED")
+                or parent.parent_task_id is not None
+                or not self.can_manage(parent, actor)
+            ):
+                raise DomainError("Нельзя добавить подзадачу к этой задаче.")
+            if parent_version is None:
+                raise StaleAction()
+            self.repo.version(parent, parent_version)
+        elif parent_version is not None:
+            raise DomainError("Не указана родительская задача.")
         try:
             target = TaskTarget(target)
         except (ValueError, TypeError) as exc:
             raise DomainError("Недопустимый исполнитель.") from exc
+        child_participants = (
+            (peer.id,)
+            if target == TaskTarget.PEER
+            else (actor.id, peer.id)
+            if target == TaskTarget.SHARED
+            else (actor.id,)
+        )
+        if parent and child_participants != parent.participant_user_ids:
+            raise DomainError("Подзадача должна использовать состав участников эпика.")
         proposal = rating_points(proposed_points) if proposed_points is not None else None
         template = None
         if template_id is not None:
@@ -149,6 +177,7 @@ class TaskService(AuthorizedService):
             comment=comment,
             deadline=deadline,
             estimated_minutes=estimated_minutes(estimate),
+            parent_task_id=parent.id if parent else None,
             operation_key=key,
         )
         self.repo.add(task)
@@ -160,8 +189,334 @@ class TaskService(AuthorizedService):
             await self.repo.enqueue_rating(
                 task.evaluator_user_id, self.settings.rating_notification_debounce_seconds
             )
+        if parent:
+            old_version = parent.version
+            parent.version += 1
+            self.repo.audit(
+                actor,
+                parent,
+                "subtask_add",
+                {"version": old_version},
+                {"child_task_id": task.id, "version": parent.version},
+            )
+            await self.repo.flush()
         logger.info("task_created entity_id=%s actor_id=%s", task.id, actor.id)
         return task
+
+    async def _bump_parent(
+        self, actor: User, task: Task, action: str, changes: dict[str, object]
+    ) -> None:
+        if task.parent_task_id is None:
+            return
+        parent = await self.repo.get(Task, task.parent_task_id, lock=True)
+        old_version = parent.version
+        parent.version += 1
+        self.repo.audit(
+            actor,
+            parent,
+            action,
+            {"child_task_id": task.id, "version": old_version},
+            {"child_task_id": task.id, "version": parent.version, **changes},
+        )
+
+    @staticmethod
+    def _dependency_path(edges: list[tuple[int, int]], start: int, target: int) -> bool:
+        graph: dict[int, list[int]] = {}
+        for blocker_id, dependent_id in edges:
+            graph.setdefault(blocker_id, []).append(dependent_id)
+        pending = [start]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            if current == target:
+                return True
+            if current in seen:
+                continue
+            seen.add(current)
+            pending.extend(graph.get(current, ()))
+        return False
+
+    @atomic
+    async def attach_subtask(
+        self,
+        actor: User,
+        parent_id: int,
+        child_id: int,
+        parent_version: int,
+        child_version: int,
+        key: str,
+    ) -> Task:
+        actor = await self.actor(actor)
+        key = operation_key(key)
+        await self.repo.operation_lock(f"task-graph-op:{key}")
+        previous = await self.repo.graph_operation(key)
+        if previous:
+            if (
+                previous.actor_user_id != actor.id
+                or previous.new_data.get("action") != "attach_subtask"
+            ):
+                raise DomainError("Идентификатор операции уже использован.")
+            return await self.repo.get(Task, int(previous.new_data["child_task_id"]))
+        await self.repo.operation_lock("task-graph")
+        if parent_id == child_id:
+            raise DomainError("Задача не может быть своей подзадачей.")
+        rows = {
+            entity_id: await self.repo.get(Task, entity_id, lock=True)
+            for entity_id in sorted((parent_id, child_id))
+        }
+        parent, child = rows[parent_id], rows[child_id]
+        await self.validate_participants(parent)
+        await self.validate_participants(child)
+        if (
+            parent.deleted_at
+            or parent.status in ("DONE", "CANCELLED")
+            or parent.parent_task_id is not None
+            or not self.can_manage(parent, actor)
+        ):
+            raise DomainError("Нельзя изменять состав этой задачи.")
+        if child.deleted_at or child.parent_task_id is not None or child.status == "CANCELLED":
+            raise DomainError("Эту задачу нельзя прикрепить к эпику.")
+        if await self.repo.children(child.id):
+            raise DomainError("Вложенные эпики пока не поддерживаются.")
+        if child.participant_user_ids != parent.participant_user_ids:
+            raise DomainError("У подзадачи должен быть тот же исполнитель, что у эпика.")
+        self.repo.version(parent, parent_version)
+        self.repo.version(child, child_version)
+        parent_before, child_before = parent.version, child.version
+        child.parent_task_id = parent.id
+        child.version += 1
+        parent.version += 1
+        self.repo.audit(
+            actor,
+            child,
+            "attach_parent",
+            {"parent_task_id": None, "version": child_before},
+            {"parent_task_id": parent.id, "version": child.version},
+        )
+        self.repo.audit(
+            actor,
+            parent,
+            "subtask_add",
+            {"version": parent_before},
+            {
+                "action": "attach_subtask",
+                "child_task_id": child.id,
+                "operation_key": key,
+                "version": parent.version,
+            },
+        )
+        await self.repo.flush()
+        return child
+
+    @atomic
+    async def detach_subtask(
+        self,
+        actor: User,
+        parent_id: int,
+        child_id: int,
+        parent_version: int,
+        child_version: int,
+        key: str,
+    ) -> Task:
+        actor = await self.actor(actor)
+        key = operation_key(key)
+        await self.repo.operation_lock(f"task-graph-op:{key}")
+        previous = await self.repo.graph_operation(key)
+        if previous:
+            if (
+                previous.actor_user_id != actor.id
+                or previous.new_data.get("action") != "detach_subtask"
+            ):
+                raise DomainError("Идентификатор операции уже использован.")
+            return await self.repo.get(Task, int(previous.new_data["child_task_id"]))
+        await self.repo.operation_lock("task-graph")
+        rows = {
+            entity_id: await self.repo.get(Task, entity_id, lock=True)
+            for entity_id in sorted((parent_id, child_id))
+        }
+        parent, child = rows[parent_id], rows[child_id]
+        await self.validate_participants(parent)
+        await self.validate_participants(child)
+        if (
+            parent.deleted_at
+            or parent.status in ("DONE", "CANCELLED")
+            or not self.can_manage(parent, actor)
+            or child.parent_task_id != parent.id
+        ):
+            raise DomainError("Открепить эту задачу нельзя.")
+        self.repo.version(parent, parent_version)
+        self.repo.version(child, child_version)
+        parent_before, child_before = parent.version, child.version
+        child.parent_task_id = None
+        child.version += 1
+        parent.version += 1
+        self.repo.audit(
+            actor,
+            child,
+            "detach_parent",
+            {"parent_task_id": parent.id, "version": child_before},
+            {"parent_task_id": None, "version": child.version},
+        )
+        self.repo.audit(
+            actor,
+            parent,
+            "subtask_remove",
+            {"version": parent_before},
+            {
+                "action": "detach_subtask",
+                "child_task_id": child.id,
+                "operation_key": key,
+                "version": parent.version,
+            },
+        )
+        await self.repo.flush()
+        return child
+
+    @atomic
+    async def create_link(
+        self,
+        actor: User,
+        task_id: int,
+        target_id: int,
+        kind: str,
+        task_version: int,
+        target_version: int,
+        key: str,
+    ) -> TaskLink:
+        actor = await self.actor(actor)
+        key = operation_key(key)
+        await self.repo.operation_lock(f"task-graph-op:{key}")
+        existing_by_key = await self.repo.link_by_operation(key)
+        if existing_by_key:
+            if existing_by_key.created_by_user_id != actor.id:
+                raise DomainError("Доступ запрещён.")
+            return existing_by_key
+        await self.repo.operation_lock("task-graph")
+        if kind not in ("RELATED", "DEPENDS_ON") or task_id == target_id:
+            raise DomainError("Недопустимая связь между задачами.")
+        rows = {
+            entity_id: await self.repo.get(Task, entity_id, lock=True)
+            for entity_id in sorted((task_id, target_id))
+        }
+        current, target = rows[task_id], rows[target_id]
+        await self.validate_participants(current)
+        await self.validate_participants(target)
+        if (
+            current.deleted_at
+            or target.deleted_at
+            or current.status == "CANCELLED"
+            or target.status == "CANCELLED"
+        ):
+            raise DomainError("Связать можно только доступные задачи.")
+        self.repo.version(current, task_version)
+        self.repo.version(target, target_version)
+        if kind == "RELATED":
+            if not self.can_manage(current, actor) and not self.can_manage(target, actor):
+                raise DomainError("Связь может изменить управляющий задачей.")
+            a_id, b_id = sorted((task_id, target_id))
+        else:
+            if not self.can_manage(current, actor):
+                raise DomainError("Связь может изменить управляющий зависимой задачей.")
+            if current.parent_task_id == target.id or target.parent_task_id == current.id:
+                raise DomainError("Связь с эпиком уже задана структурой подзадач.")
+            a_id, b_id = target.id, current.id  # blocker -> dependent
+            if self._dependency_path(await self.repo.active_dependency_edges(), b_id, a_id):
+                raise DomainError("Эта зависимость создаст цикл.")
+        if any(
+            link.kind == kind and (link.task_a_id, link.task_b_id) == (a_id, b_id)
+            for link in await self.repo.links_for(task_id)
+        ):
+            raise DomainError("Такая связь уже есть.")
+        link = TaskLink(
+            task_a_id=a_id,
+            task_b_id=b_id,
+            kind=kind,
+            created_by_user_id=actor.id,
+            operation_key=key,
+        )
+        self.repo.add(link)
+        await self.repo.flush()
+        old_current, old_target = current.version, target.version
+        current.version += 1
+        target.version += 1
+        self.repo.audit(
+            actor,
+            current,
+            "link_add",
+            {"version": old_current},
+            {"link_id": link.id, "operation_key": key, "version": current.version},
+        )
+        self.repo.audit(
+            actor,
+            target,
+            "link_add",
+            {"version": old_target},
+            {"link_id": link.id, "version": target.version},
+        )
+        await self.repo.flush()
+        return link
+
+    @atomic
+    async def remove_link(self, actor: User, link_id: int, version: int, key: str) -> TaskLink:
+        actor = await self.actor(actor)
+        key = operation_key(key)
+        await self.repo.operation_lock(f"task-graph-op:{key}")
+        previous = await self.repo.graph_operation(key)
+        if previous:
+            if (
+                previous.actor_user_id != actor.id
+                or previous.new_data.get("action") != "remove_link"
+            ):
+                raise DomainError("Идентификатор операции уже использован.")
+            return await self.repo.get(TaskLink, int(previous.new_data["link_id"]))
+        await self.repo.operation_lock("task-graph")
+        link = await self.repo.get(TaskLink, link_id, lock=True)
+        self.repo.version(link, version)
+        if link.removed_at:
+            raise StaleAction()
+        rows = {
+            entity_id: await self.repo.get(Task, entity_id, lock=True)
+            for entity_id in sorted((link.task_a_id, link.task_b_id))
+        }
+        a, b = rows[link.task_a_id], rows[link.task_b_id]
+        await self.validate_participants(a)
+        await self.validate_participants(b)
+        managed = (
+            self.can_manage(a, actor) or self.can_manage(b, actor)
+            if link.kind == "RELATED"
+            else self.can_manage(b, actor)
+        )
+        if not managed:
+            raise DomainError("Удалить эту связь может только управляющий задачей.")
+        key = operation_key(key)
+        old = {"removed_at": None, "version": link.version}
+        link.removed_at, link.removed_by_operation_key = utcnow(), key
+        link.version += 1
+        old_a, old_b = a.version, b.version
+        a.version += 1
+        b.version += 1
+        self.repo.audit(
+            actor,
+            a,
+            "link_remove",
+            {"version": old_a},
+            {
+                "action": "remove_link",
+                "link_id": link.id,
+                "operation_key": key,
+                "version": a.version,
+            },
+        )
+        self.repo.audit(
+            actor,
+            b,
+            "link_remove",
+            {"version": old_b},
+            {"link_id": link.id, "version": b.version},
+        )
+        self.repo.audit(actor, link, "remove", old, {"removed_at": str(link.removed_at)})
+        await self.repo.flush()
+        return link
 
     async def view(self, actor: User, task_id: int) -> Task:
         actor = await self.actor(actor)
@@ -191,6 +546,7 @@ class TaskService(AuthorizedService):
     async def rate(self, actor: User, task_id: int, points: int, version: int) -> Task:
         actor = await self.actor(actor)
         points = rating_points(points)
+        await self.repo.operation_lock("task-graph")
         task = await self.repo.get(Task, task_id, lock=True)
         await self.validate_participants(task)
         if task.deleted_at:
@@ -206,6 +562,7 @@ class TaskService(AuthorizedService):
         task.status = "TODO"
         task.version += 1
         self.repo.audit(actor, task, "rate", {"rated_points": None}, {"rated_points": points})
+        await self._bump_parent(actor, task, "subtask_rate", {"rated_points": points})
         self.repo.add(
             Notification(
                 recipient_user_id=task.proposal_by_user_id,
@@ -231,11 +588,29 @@ class TaskService(AuthorizedService):
         self, actor: User, task_id: int, status: str, version: int, confirmed: bool = False
     ) -> Task:
         actor = await self.actor(actor)
+        await self.repo.operation_lock("task-graph")
         task = await self.repo.get(Task, task_id, lock=True)
         await self.validate_participants(task)
         if task.deleted_at or not self.can_manage(task, actor):
             raise DomainError("Статус меняет только владелец задачи.")
         self.repo.version(task, version)
+        parent = None
+        if task.parent_task_id is not None:
+            parent = await self.repo.get(Task, task.parent_task_id, lock=True)
+            await self.validate_participants(parent)
+        if task.status == "DONE" and status in ("TODO", "IN_PROGRESS") and parent:
+            if parent.status == "DONE":
+                raise DomainError("Сначала открой родительскую задачу.")
+        children = await self.repo.children(task.id, lock=True)
+        if status == "DONE" and children and any(child.status != "DONE" for child in children):
+            raise DomainError("Сначала заверши все подзадачи.")
+        if status == "DONE":
+            blockers = await self.repo.blockers(task.id)
+            pending_blockers = [blocker for blocker in blockers if blocker.status != "DONE"]
+            if pending_blockers:
+                raise DomainError("Сначала заверши блокирующую задачу.")
+        if status == "CANCELLED" and children:
+            raise DomainError("Сначала открепи подзадачи от родительской задачи.")
         transition(task.status, status, confirmed)
         old = {
             "status": task.status,
@@ -279,6 +654,24 @@ class TaskService(AuthorizedService):
         self.repo.audit(
             actor, task, "status", old, {"status": status, "awarded_points": task.awarded_points}
         )
+        if parent:
+            old_parent_version = parent.version
+            parent.version += 1
+            self.repo.audit(
+                actor,
+                parent,
+                "subtask_status",
+                {
+                    "child_task_id": task.id,
+                    "child_status": old["status"],
+                    "version": old_parent_version,
+                },
+                {
+                    "child_task_id": task.id,
+                    "child_status": status,
+                    "version": parent.version,
+                },
+            )
         await self.repo.flush()
         logger.info("task_status entity_id=%s status=%s", task.id, status)
         return task
@@ -286,6 +679,7 @@ class TaskService(AuthorizedService):
     @atomic
     async def edit(self, actor: User, task_id: int, version: int, **changes: object) -> Task:
         actor = await self.actor(actor)
+        await self.repo.operation_lock("task-graph")
         task = await self.repo.get(Task, task_id, lock=True)
         await self.validate_participants(task)
         if (
@@ -332,6 +726,9 @@ class TaskService(AuthorizedService):
                 task.evaluator_user_id, self.settings.rating_notification_debounce_seconds
             )
         task.version += 1
+        await self._bump_parent(
+            actor, task, "subtask_edit", {"title": task.title, "status": task.status}
+        )
         self.repo.audit(
             actor,
             task,
@@ -347,6 +744,7 @@ class TaskService(AuthorizedService):
         self, actor: User, task_id: int, version: int, confirmed: bool = False
     ) -> Task:
         actor = await self.actor(actor)
+        await self.repo.operation_lock("task-graph")
         task = await self.repo.get(Task, task_id, lock=True)
         await self.validate_participants(task)
         self.repo.version(task, version)
@@ -356,6 +754,7 @@ class TaskService(AuthorizedService):
             raise DomainError("Подтверди отклонение задачи.")
         task.status, task.cancelled_at = "CANCELLED", utcnow()
         task.version += 1
+        await self._bump_parent(actor, task, "subtask_reject", {"status": task.status})
         self.repo.audit(actor, task, "reject", {"status": "BACKLOG"}, {"status": "CANCELLED"})
         self.repo.add(
             Notification(
@@ -381,6 +780,7 @@ class TaskService(AuthorizedService):
     ) -> Task:
         actor = await self.actor(actor)
         points = rating_points(points)
+        await self.repo.operation_lock("task-graph")
         task = await self.repo.get(Task, task_id, lock=True)
         await self.validate_participants(task)
         self.repo.version(task, version)
@@ -398,6 +798,7 @@ class TaskService(AuthorizedService):
         old = task.rated_points
         task.rated_points, task.rated_at = points, utcnow()
         task.version += 1
+        await self._bump_parent(actor, task, "subtask_rerate", {"rated_points": points})
         self.repo.audit(actor, task, "rerate", {"rated_points": old}, {"rated_points": points})
         recipient = (
             (await self.user_repo.peer(actor)).id if task.kind == "SHARED" else task.owner_user_id

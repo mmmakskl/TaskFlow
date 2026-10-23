@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from datetime import date, datetime
 from datetime import time as day_time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
@@ -50,6 +50,8 @@ class TaskInput(BaseModel):
     operation_key: str = Field(min_length=1, max_length=80)
     template_id: int | None = Field(default=None, ge=1)
     template_version: int | None = Field(default=None, ge=1)
+    parent_task_id: int | None = Field(default=None, ge=1)
+    parent_version: int | None = Field(default=None, ge=1)
 
 
 class TaskEdit(BaseModel):
@@ -69,6 +71,31 @@ class TaskAction(BaseModel):
     status: str | None = None
     points: int | None = Field(default=None, ge=1, le=10000)
     confirmed: bool = False
+
+
+class SubtaskRelationEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1)
+    child_version: int = Field(ge=1)
+    operation_key: str = Field(min_length=1, max_length=80)
+
+
+class TaskLinkInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_task_id: int = Field(ge=1)
+    target_version: int = Field(ge=1)
+    version: int = Field(ge=1)
+    kind: Literal["RELATED", "DEPENDS_ON"]
+    operation_key: str = Field(min_length=1, max_length=80)
+
+
+class TaskLinkRemove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1)
+    operation_key: str = Field(min_length=1, max_length=80)
 
 
 class TemplateInput(BaseModel):
@@ -194,7 +221,16 @@ def task_json(task: Task, names: dict[int, str]) -> dict[str, Any]:
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "rating_source": task.rating_source,
         "rated_by": names.get(task.rated_by_user_id) if task.rated_by_user_id else None,
+        "parent_task_id": task.parent_task_id,
     }
+
+
+def task_points(task: Task) -> int | None:
+    if task.status == "DONE":
+        return task.awarded_points
+    if task.status in ("TODO", "IN_PROGRESS"):
+        return task.rated_points
+    return None
 
 
 def template_json(template: TaskTemplate) -> dict[str, Any]:
@@ -336,8 +372,24 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             if scope in ("mine", "peer")
             else None
         )
+        items: list[dict[str, Any]] = []
+        for task in rows:
+            item = task_json(task, names)
+            children = await task_service.repo.children(task.id)
+            item["children"] = [task_json(child, names) for child in children]
+            item["subtask_summary"] = {
+                "count": len(children),
+                "done_count": sum(1 for child in children if child.status == "DONE"),
+                "agreed_points": sum(task_points(child) or 0 for child in children),
+                "progress": round(
+                    100 * sum(1 for child in children if child.status == "DONE") / len(children)
+                )
+                if children
+                else 0,
+            }
+            items.append(item)
         return {
-            "items": [task_json(task, names) for task in rows],
+            "items": items,
             "count": count,
             "page": min(page, max(0, (count - 1) // 5)),
             "page_size": 5,
@@ -354,6 +406,45 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             ),
         }
 
+    @router.get("/api/miniapp/tasks/{parent_id}/attachable")
+    async def attachable_tasks(
+        parent_id: int,
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        parent = await task_service.view(actor, parent_id)
+        if not task_service.can_manage(parent, actor) or parent.parent_task_id is not None:
+            raise HTTPException(403, "Недостаточно прав")
+        candidates: dict[int, Task] = {}
+        for scope in ("mine", "peer", "shared", "assigned"):
+            for filter_name in ("all", "done"):
+                page = 0
+                while True:
+                    rows, count = await task_service.repo.list(
+                        actor, filter_name, page, scope=scope
+                    )
+                    candidates.update(
+                        {
+                            task.id: task
+                            for task in rows
+                            if task.id != parent.id and task.parent_task_id is None
+                        }
+                    )
+                    if (page + 1) * 5 >= count:
+                        break
+                    page += 1
+        eligible = []
+        for task in candidates.values():
+            if (
+                task.participant_user_ids == parent.participant_user_ids
+                and task.status != "CANCELLED"
+                and not await task_service.repo.children(task.id)
+            ):
+                eligible.append(task)
+        names = {u.id: u.display_name for u in await task_service.repo.users()}
+        return {"items": [task_json(task, names) for task in eligible]}
+
     @router.get("/api/miniapp/tasks/{task_id}")
     async def task_detail(
         task_id: int,
@@ -366,11 +457,64 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         result = task_json(task, names)
         result["comment"] = task.comment
         result["can_manage"] = task_service.can_manage(task, actor)
+        result["child_target"] = (
+            "SHARED"
+            if task.kind == "SHARED"
+            else "SELF"
+            if task.owner_user_id == actor.id
+            else "PEER"
+        )
+        parent_task = (
+            await task_service.view(actor, task.parent_task_id)
+            if task.parent_task_id is not None
+            else None
+        )
+        result["parent"] = (
+            {"id": parent_task.id, "title": parent_task.title, "status": parent_task.status}
+            if parent_task
+            else None
+        )
+        result["blocked_by_parent"] = bool(parent_task and parent_task.status == "DONE")
         result["can_rerate"] = task.rated_by_user_id == actor.id and task.status in (
             "TODO",
             "IN_PROGRESS",
         )
         result["is_evaluator"] = task.evaluator_user_id == actor.id and task.status == "BACKLOG"
+        children = await task_service.repo.children(task.id)
+        result["children"] = [task_json(child, names) for child in children]
+        result["subtask_summary"] = {
+            "count": len(children),
+            "done_count": sum(1 for child in children if child.status == "DONE"),
+            "agreed_points": sum(task_points(child) or 0 for child in children),
+            "progress": round(
+                100 * sum(1 for child in children if child.status == "DONE") / len(children)
+            )
+            if children
+            else 0,
+        }
+        result["bonus_points"] = task_points(task)
+        result["blockers"] = [
+            {"id": blocker.id, "title": blocker.title, "status": blocker.status}
+            for blocker in await task_service.repo.blockers(task.id)
+            if blocker.status != "DONE"
+        ]
+        links = await task_service.repo.links_for(task.id)
+        result["links"] = []
+        for link in links:
+            if link.removed_at:
+                continue
+            other_id = link.task_b_id if link.task_a_id == task.id else link.task_a_id
+            other = await task_service.view(actor, other_id)
+            result["links"].append(
+                {
+                    "id": link.id,
+                    "version": link.version,
+                    "kind": link.kind,
+                    "task_id": other.id,
+                    "title": other.title,
+                    "status": other.status,
+                }
+            )
         return result
 
     @router.post("/api/miniapp/tasks", status_code=201)
@@ -396,9 +540,69 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             proposed_points=body.proposed_points,
             template_id=body.template_id,
             template_version=body.template_version,
+            parent_task_id=body.parent_task_id,
+            parent_version=body.parent_version,
         )
         names = {user.id: user.display_name for user in await task_service.repo.users()}
         return task_json(task, names)
+
+    @router.post("/api/miniapp/tasks/{parent_id}/subtasks/{child_id}")
+    async def subtask_attach(
+        parent_id: int,
+        child_id: int,
+        body: SubtaskRelationEdit,
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        child = await task_service.attach_subtask(
+            actor, parent_id, child_id, body.version, body.child_version, body.operation_key
+        )
+        return task_json(child, {u.id: u.display_name for u in await task_service.repo.users()})
+
+    @router.delete("/api/miniapp/tasks/{parent_id}/subtasks/{child_id}")
+    async def subtask_detach(
+        parent_id: int,
+        child_id: int,
+        body: SubtaskRelationEdit,
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        child = await task_service.detach_subtask(
+            actor, parent_id, child_id, body.version, body.child_version, body.operation_key
+        )
+        return task_json(child, {u.id: u.display_name for u in await task_service.repo.users()})
+
+    @router.post("/api/miniapp/tasks/{task_id}/links", status_code=201)
+    async def task_link_create(
+        task_id: int,
+        body: TaskLinkInput,
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        link = await task_service.create_link(
+            actor,
+            task_id,
+            body.target_task_id,
+            body.kind,
+            body.version,
+            body.target_version,
+            body.operation_key,
+        )
+        return {"id": link.id, "version": link.version, "kind": link.kind}
+
+    @router.delete("/api/miniapp/task-links/{link_id}")
+    async def task_link_remove(
+        link_id: int,
+        body: TaskLinkRemove,
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        link = await task_service.remove_link(actor, link_id, body.version, body.operation_key)
+        return {"id": link.id, "removed": True}
 
     @router.patch("/api/miniapp/tasks/{task_id}")
     async def task_edit(

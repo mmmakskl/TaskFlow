@@ -210,6 +210,15 @@ class UIService:
         task = await self.tasks.view(actor, task_id)
         delay = deadline_delay(task, utcnow())
         users = {user.id: user for user in await self.tasks.repo.users()}
+        children = await self.tasks.repo.children(task.id)
+        blockers = [
+            blocker
+            for blocker in await self.tasks.repo.blockers(task.id)
+            if blocker.status != "DONE"
+        ]
+        parent = await self.tasks.view(actor, task.parent_task_id) if task.parent_task_id else None
+        blocked_by_parent = bool(parent and parent.status == "DONE")
+        unfinished_children = [child for child in children if child.status != "DONE"]
         text = f"📝 <b>{safe(task.title)}</b>\n\n👤 {safe(users[task.owner_user_id].display_name)}\n{STATUS_LABELS[task.status]}"
         if task.status == "BACKLOG":
             pending_label = (
@@ -252,6 +261,25 @@ class UIService:
         )
         if task.comment:
             text += f"\n\nКомментарий:\n{safe(task.comment)}"
+        if parent:
+            text += f"\n\n🧩 Подзадача эпика: {safe(parent.title)}"
+        if children:
+            agreed = sum(
+                (child.awarded_points if child.status == "DONE" else child.rated_points or 0) or 0
+                for child in children
+                if child.status in ("DONE", "TODO", "IN_PROGRESS")
+            )
+            text += (
+                f"\n\n🧩 Подзадачи: {len(children) - len(unfinished_children)}/{len(children)}"
+                f"\nСогласованные оценки: {points(agreed)}"
+                f"\nБонус эпика: {points(task.rated_points) if task.rated_points else 'согласуется отдельно'}"
+            )
+            for child in children:
+                text += f"\n• {safe(child.title)} — {STATUS_LABELS[child.status]}"
+        if blockers:
+            text += "\n\n⛔ Сначала выполните: " + ", ".join(safe(item.title) for item in blockers)
+        if blocked_by_parent:
+            text += "\n\n⛔ Сначала откройте эпик, чтобы изменить эту подзадачу."
         rows = []
         if task.status == "DONE":
             assert task.completed_at is not None and task.awarded_points is not None
@@ -264,12 +292,20 @@ class UIService:
                 rows.append(
                     [
                         button("▶️ Начать", "status", task.id, task.version, "IN_PROGRESS"),
-                        button(
-                            "✅ Выполнено для обоих" if task.kind == "SHARED" else "✅ Выполнено",
-                            "status",
-                            task.id,
-                            task.version,
-                            "DONE",
+                        *(
+                            [
+                                button(
+                                    "✅ Выполнено для обоих"
+                                    if task.kind == "SHARED"
+                                    else "✅ Выполнено",
+                                    "status",
+                                    task.id,
+                                    task.version,
+                                    "DONE",
+                                )
+                            ]
+                            if not blockers and not unfinished_children
+                            else []
                         ),
                     ]
                 )
@@ -277,16 +313,24 @@ class UIService:
                 rows.append(
                     [
                         button("📌 К выполнению", "status", task.id, task.version, "TODO"),
-                        button(
-                            "✅ Выполнено для обоих" if task.kind == "SHARED" else "✅ Выполнено",
-                            "status",
-                            task.id,
-                            task.version,
-                            "DONE",
+                        *(
+                            [
+                                button(
+                                    "✅ Выполнено для обоих"
+                                    if task.kind == "SHARED"
+                                    else "✅ Выполнено",
+                                    "status",
+                                    task.id,
+                                    task.version,
+                                    "DONE",
+                                )
+                            ]
+                            if not blockers and not unfinished_children
+                            else []
                         ),
                     ]
                 )
-            if task.status == "DONE":
+            if task.status == "DONE" and not blocked_by_parent:
                 rows.append(
                     [
                         button("↩️ К выполнению", "status", task.id, task.version, "TODO"),

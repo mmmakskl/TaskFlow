@@ -98,7 +98,11 @@ async def test_maximum_unicode_task_screens_and_callbacks_fit_limits():
         created_at=datetime(2026, 10, 7, tzinfo=UTC),
     )
     repo = SimpleNamespace(
-        users=AsyncMock(return_value=users), pending_next=AsyncMock(return_value=(task, 1))
+        users=AsyncMock(return_value=users),
+        pending_next=AsyncMock(return_value=(task, 1)),
+        children=AsyncMock(return_value=[]),
+        blockers=AsyncMock(return_value=[]),
+        links_for=AsyncMock(return_value=[]),
     )
     tasks = SimpleNamespace(
         view=AsyncMock(return_value=task),

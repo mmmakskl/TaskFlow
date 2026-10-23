@@ -72,7 +72,7 @@ docker compose exec -T db psql -U taskflow -d taskflow -c \
   'SELECT kind, status, count(*) FROM taskflow.notifications GROUP BY kind, status'
 ```
 
-Inspect counts/IDs/statuses first, not full private payloads. Current migration head is 0006;
+Inspect counts/IDs/statuses first, not full private payloads. Current migration head is 0007;
 `public.alembic_version` records it. Use `make migrate` locally; Render's image runs the same upgrade
 before accepting requests. Never run fixtures, schema resets or integration tests on production.
 

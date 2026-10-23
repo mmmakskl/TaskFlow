@@ -45,6 +45,17 @@ reading their attributes; rollback may expire them. An outer rollback discards e
   and all-time category=task ledger sum without penalties. Shared work counts once per person.
 - Template data is snapshotted; later template edits never rewrite a task's terms. Creation locks
   and checks the selected template version/active status; mismatches require explicit resubmission.
+- Root tasks may own one level of subtasks. Parent and child participants must match; each child
+  keeps its own proposal, approval, award and immutable score history. Creating or attaching a child
+  increments the parent version and writes audit events. Detaching changes only the relationship.
+- A parent cannot complete while it has any non-DONE child. Its own agreed award is an independent
+  epic bonus, earned only when the parent is completed. Reopen the parent before reopening a DONE
+  child; parent reopen compensates its original bonus week. Cancelled children must be detached.
+- Related links do not affect state. A DEPENDS_ON edge points blocker → dependent; completion is
+  blocked until all direct blockers are DONE. Cycles are rejected across explicit dependencies and
+  child→parent edges. Reopening a blocker does not reopen completed dependents.
+- Default task lists include BACKLOG, TODO and IN_PROGRESS only. DONE appears in the Done filter;
+  CANCELLED appears in Archive. Lists show roots, with children presented inside parent details.
 
 ## Penalties and concurrency
 

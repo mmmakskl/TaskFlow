@@ -40,7 +40,7 @@ async def task_for(service, owner, peer, title, deadline, *, shared=False, done=
     return task
 
 
-async def test_overdue_scope_includes_late_done_excludes_on_time_cancelled_and_future(
+async def test_overdue_scope_excludes_done_and_on_time_cancelled_and_future(
     factory, settings, clock
 ):
     async with factory.begin() as session:
@@ -58,7 +58,9 @@ async def test_overdue_scope_includes_late_done_excludes_on_time_cancelled_and_f
         cancelled = await task_for(service, owner, peer, "cancelled", AT - timedelta(days=1))
         await service.change_status(peer, cancelled.id, "CANCELLED", cancelled.version, True)
         rows, count = await repo.list(owner, "overdue", scope="peer")
-        assert count == 3 and {t.id for t in rows} == {late.id, active.id, shared.id}
+        assert count == 2 and {t.id for t in rows} == {active.id, shared.id}
+        done_rows, done_count = await repo.list(owner, "done", scope="peer")
+        assert done_count == 2 and any(task.id == late.id for task in done_rows)
         mine, count = await repo.list(owner, "overdue", scope="mine")
         assert count == 1 and mine[0].id == shared.id
         with pytest.raises(DomainError, match="нет просрочки"):
@@ -88,7 +90,7 @@ async def test_peer_overdue_manual_penalty_prefilled_confirmed_and_idempotent(
     await driver.text(1001, "/menu")
     await driver.press(1001, "Все задачи")
     await driver.press(1001, "Вика")
-    await driver.press(1001, "Просроченные")
+    await driver.press(1001, "Выполненные" if done else "Просроченные")
     row = next(
         b.text
         for row in driver.screen(1001).reply_markup.inline_keyboard

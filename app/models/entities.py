@@ -95,6 +95,7 @@ class Task(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parent_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
     operation_key: Mapped[str] = mapped_column(String(80), unique=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     __table_args__ = (
@@ -129,6 +130,9 @@ class Task(TimestampMixin, Base):
             name="ck_tasks_template_rating",
         ),
         CheckConstraint("version > 0", name="ck_tasks_version"),
+        CheckConstraint(
+            "parent_task_id IS NULL OR parent_task_id <> id", name="ck_tasks_not_own_parent"
+        ),
         CheckConstraint(
             "status = 'DONE' OR (completed_at IS NULL AND awarded_points IS NULL)",
             name="ck_tasks_no_uncompleted_award",
@@ -165,6 +169,7 @@ class Task(TimestampMixin, Base):
         Index("ix_tasks_evaluator_status_id", "evaluator_user_id", "status", "id"),
         Index("ix_tasks_shared_status", "shared_user_id", "status", "id"),
         Index("ix_tasks_completed_at", "completed_at"),
+        Index("ix_tasks_parent_id", "parent_task_id", "id"),
     )
 
     @property
@@ -174,6 +179,38 @@ class Task(TimestampMixin, Base):
             if self.shared_user_id
             else (self.owner_user_id,)
         )
+
+
+class TaskLink(TimestampMixin, Base):
+    __tablename__ = "task_links"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_a_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"))
+    task_b_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"))
+    kind: Mapped[str] = mapped_column(String(20))
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    operation_key: Mapped[str] = mapped_column(String(80), unique=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removed_by_operation_key: Mapped[str | None] = mapped_column(String(80), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    __table_args__ = (
+        CheckConstraint("task_a_id <> task_b_id", name="ck_task_links_distinct_tasks"),
+        CheckConstraint("kind IN ('RELATED','DEPENDS_ON')", name="ck_task_links_kind"),
+        CheckConstraint("version > 0", name="ck_task_links_version"),
+        CheckConstraint(
+            "(removed_at IS NULL) = (removed_by_operation_key IS NULL)",
+            name="ck_task_links_removed_operation",
+        ),
+        Index(
+            "uq_task_links_active_pair",
+            "kind",
+            "task_a_id",
+            "task_b_id",
+            unique=True,
+            postgresql_where=text("removed_at IS NULL"),
+        ),
+        Index("ix_task_links_a", "task_a_id", "id"),
+        Index("ix_task_links_b", "task_b_id", "id"),
+    )
 
 
 class TaskTemplate(TimestampMixin, Base):

@@ -44,7 +44,8 @@ async def test_shared_concurrent_completion_reopen_and_summaries(factory, settin
         assert await session.scalar(select(func.count(ScoreEvent.id))) == 2
         assert (await repo.summary(owner)).completed_points == 500
         assert (await repo.summary(owner, scope="peer")).completed_points == 500
-        assert (await repo.list(owner, scope="peer"))[1] == 1
+        assert (await repo.list(owner, scope="peer"))[1] == 0
+        assert (await repo.list(owner, "done", scope="peer"))[1] == 1
         task = await session.get(Task, task_id)
         await TaskService(repo, settings).change_status(peer, task.id, "TODO", task.version, True)
         assert (await repo.summary(owner)).completed_points == 0

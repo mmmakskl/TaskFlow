@@ -5,7 +5,16 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from app.models import Notification, Penalty, PenaltyType, ScoreEvent, User
+from app.models import (
+    AuditEvent,
+    Notification,
+    Penalty,
+    PenaltyType,
+    ScoreEvent,
+    Task,
+    TaskLink,
+    User,
+)
 from app.repositories.base import Repository
 from app.repositories.penalties import PenaltyRepository
 from app.repositories.tasks import TaskRepository
@@ -125,6 +134,55 @@ class MemoryTasks(MemoryRepository, TaskRepository):
                     available_at=NOW,
                 )
             )
+
+    async def children(self, parent_id, *, lock=False):
+        return [
+            row
+            for row in self.session.of(Task)
+            if getattr(row, "parent_task_id", None) == parent_id and row.deleted_at is None
+        ]
+
+    async def links_for(self, task_id):
+        return [
+            row
+            for row in self.session.of(TaskLink)
+            if row.removed_at is None and task_id in (row.task_a_id, row.task_b_id)
+        ]
+
+    async def blockers(self, task_id):
+        return [
+            task
+            for link in self.session.of(TaskLink)
+            if link.kind == "DEPENDS_ON" and link.task_b_id == task_id and link.removed_at is None
+            for task in self.session.of(Task)
+            if task.id == link.task_a_id
+        ]
+
+    async def active_dependency_edges(self):
+        from_task_links = [
+            (row.task_a_id, row.task_b_id)
+            for row in self.session.of(TaskLink)
+            if row.kind == "DEPENDS_ON" and row.removed_at is None
+        ]
+        hierarchy = [
+            (row.id, row.parent_task_id)
+            for row in self.session.of(Task)
+            if row.parent_task_id is not None
+        ]
+        return from_task_links + hierarchy
+
+    async def link_by_operation(self, key):
+        return next((row for row in self.session.of(TaskLink) if row.operation_key == key), None)
+
+    async def graph_operation(self, key):
+        return next(
+            (
+                row
+                for row in self.session.of(AuditEvent)
+                if row.new_data.get("operation_key") == key
+            ),
+            None,
+        )
 
 
 class MemoryPenalties(MemoryRepository, PenaltyRepository):
