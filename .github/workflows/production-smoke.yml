@@ -1,5 +1,7 @@
 name: Production HTTP smoke
 on:
+  schedule:
+    - cron: '23 */6 * * *'
   workflow_dispatch:
   push:
     branches: [main]

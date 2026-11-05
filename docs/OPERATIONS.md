@@ -6,6 +6,14 @@ Check `GET /health` for process liveness and `GET /ready` for startup readiness 
 
 Use Render Events to inspect build/deploy failures, and Logs for migration, database, webhook and handler errors. Never paste token-bearing URLs or database passwords into issues or shared logs.
 
+The production HTTP smoke workflow runs every six hours and calls `/ready`, which exercises the
+PostgreSQL connection. This keeps a low-traffic Supabase Free project active under its inactivity
+policy and wakes the Render Free service. GitHub scheduled workflows can be delayed, so this is a
+best-effort safeguard rather than an uptime guarantee. If Render startup fails with a database
+connection error after a long idle period, inspect the Supabase project state and resume it in the
+Supabase Dashboard before retrying the Render deploy. Do not change the database URL or migrate via
+the Supabase SQL editor as a workaround.
+
 ## First response
 
 1. Identify the **deployed commit** in Render Events; compare it with the intended release and CI.

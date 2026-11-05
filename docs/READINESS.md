@@ -1,5 +1,20 @@
 # Production readiness evidence
 
+## Render startup failure — 2026-11-05
+
+Render deployment `dep-dbljokt9fdbs73dkmgb0` of `e01f11a` failed while startup migration code
+opened PostgreSQL: SQLAlchemy reported `InternalError` with SQLSTATE `XX000`; Uvicorn never bound a
+port. The Supabase Dashboard confirmed that the TaskFlow Free project was paused. The preceding Live
+deployment was 12 days earlier, beyond the seven-day low-activity pause window. The public `/health`
+and `/ready` endpoints timed out during investigation because Render had no responding application
+while the database dependency was unavailable.
+
+The Supabase project was resumed from its dashboard. The production HTTP smoke workflow now runs
+every six hours and queries `/ready` to reduce the chance of another inactivity pause. It cannot
+resume an already paused database, guarantee a scheduled run on time, or replace paid-plan
+availability. After resuming, deploy the intended commit and verify `/health`, `/ready`, migration
+revision and Telegram webhook delivery. No schema or business data should be reset.
+
 ## Collaborative/deadline production release — 2026-10-07
 
 PR [#5](https://github.com/mmmakskl/TaskFlow/pull/5) merged as
