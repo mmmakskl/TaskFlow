@@ -6,6 +6,7 @@ from app.services.rules import (
     DomainError,
     estimated_minutes,
     operation_key,
+    positive_integer,
     rating_points,
     text_field,
 )
@@ -45,7 +46,16 @@ class TaskTemplateService(AuthorizedService):
 
     @atomic
     async def create(
-        self, actor: User, title: str, points: int, key: str, estimate: int | None = None
+        self,
+        actor: User,
+        title: str,
+        points: int,
+        key: str,
+        estimate: int | None = None,
+        *,
+        pricing_mode: str = "FIXED",
+        base_quantity: int | None = None,
+        unit_label: str | None = None,
     ) -> TaskTemplate:
         actor = await self.actor(actor)
         await self.configured_participant_ids()
@@ -57,11 +67,15 @@ class TaskTemplateService(AuthorizedService):
             if existing.creator_user_id != actor.id:
                 raise DomainError("Доступ запрещён.")
             return existing
+        mode, base, label = self._price_config(pricing_mode, base_quantity, unit_label)
         template = TaskTemplate(
             creator_user_id=actor.id,
             title=text_field(title, 200, "Название"),
             points=rating_points(points),
             estimated_minutes=estimated_minutes(estimate),
+            pricing_mode=mode,
+            base_quantity=base,
+            unit_label=label,
             operation_key=key,
         )
         self.repo.add(template)
@@ -80,6 +94,15 @@ class TaskTemplateService(AuthorizedService):
         if not changes:
             raise DomainError("Укажи изменение.")
         old = self.snapshot(template)
+        pricing_mode = changes.get("pricing_mode", template.pricing_mode)
+        base_quantity = changes.get("base_quantity", template.base_quantity)
+        unit_label = changes.get("unit_label", template.unit_label)
+        pricing_changed = any(
+            key in changes for key in ("pricing_mode", "base_quantity", "unit_label")
+        )
+        if pricing_changed:
+            mode, base, label = self._price_config(pricing_mode, base_quantity, unit_label)
+            template.pricing_mode, template.base_quantity, template.unit_label = mode, base, label
         for field, value in changes.items():
             if field == "title" and isinstance(value, str):
                 template.title = text_field(value, 200, "Название")
@@ -87,6 +110,8 @@ class TaskTemplateService(AuthorizedService):
                 template.points = rating_points(value)
             elif field == "estimated_minutes":
                 template.estimated_minutes = estimated_minutes(value)
+            elif field in ("pricing_mode", "base_quantity", "unit_label"):
+                continue
             elif field == "is_active" and type(value) is bool:
                 template.is_active = value
             else:
@@ -114,11 +139,35 @@ class TaskTemplateService(AuthorizedService):
         return template
 
     @staticmethod
+    def _price_config(
+        mode: object, base_quantity: object, unit_label: object
+    ) -> tuple[str, int | None, str | None]:
+        if mode == "FIXED":
+            if base_quantity is not None or unit_label is not None:
+                raise DomainError("Фиксированный шаблон не использует базовое количество.")
+            return "FIXED", None, None
+        if mode == "PER_TIME":
+            base = positive_integer(base_quantity, 10080)
+            if unit_label is not None:
+                raise DomainError("Для шаблона по времени название единицы не требуется.")
+            return "PER_TIME", base, None
+        if mode == "PER_QUANTITY":
+            base = positive_integer(base_quantity, 10000)
+            if not isinstance(unit_label, str):
+                raise DomainError("Укажи название единицы.")
+            label = text_field(unit_label, 40, "Единица")
+            return "PER_QUANTITY", base, label
+        raise DomainError("Недопустимый способ расчёта шаблона.")
+
+    @staticmethod
     def snapshot(template: TaskTemplate) -> dict[str, object]:
         return {
             "title": template.title,
             "points": template.points,
             "estimated_minutes": template.estimated_minutes,
+            "pricing_mode": template.pricing_mode,
+            "base_quantity": template.base_quantity,
+            "unit_label": template.unit_label,
             "is_active": template.is_active,
             "is_deleted": template.is_deleted,
         }

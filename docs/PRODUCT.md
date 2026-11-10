@@ -37,7 +37,7 @@ proposed points, deadline, effort and comment. Fields retain existing limits (ti
 1–10000, effort 1–10080 minutes, comment 1–1500). Points and all details except title are optional.
 Only Create persists a task. Back preserves values, Menu/Cancel discard them. Deadlines use the
 creator's display timezone and end at 23:59:59; dates before today or after 2100 are rejected.
-Effort is planning information, never a score multiplier.
+Effort is planning information, never a score multiplier. A volume-priced template uses its separate selected quantity and explicit base price to calculate points.
 
 Ordinary self tasks need the peer's approval; peer-assigned tasks need the executor's acceptance;
 shared tasks need the other creator's approval. An omitted price is supplied by the approver.
@@ -106,6 +106,8 @@ completed tasks; Done contains completed items and Archive contains cancelled it
 subtask updates epic progress without moving the parent into a completed state.
 
 ## Weekly results and history
+
+The Mini App statistics dashboard compares both participants across the latest 4, 5, 8 or 12 weeks. Its weekly net chart and earned/penalty breakdown aggregate immutable score events using the shared Monday-to-Monday timezone boundaries.
 
 Default target is 10000 per user. Result = completed awarded task points − penalties; negative
 results are valid. Progress bars clamp to 0–100%, remaining target to at least zero.

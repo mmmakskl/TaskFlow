@@ -298,3 +298,26 @@ def test_collaborative_persisted_draft_missing_or_malformed_values_recover(curre
 )
 def test_collaborative_valid_partial_drafts_remain_usable(current, fields):
     assert draft_valid(current, {"flow": 1, "key": "draft-key", **fields})
+
+
+def test_volume_template_draft_requires_valid_calculated_quantity():
+    from app.bot.middlewares.interaction import draft_valid
+
+    draft = {
+        "title": "Тренировка",
+        "proposed_points": 300,
+        "template_id": 1,
+        "template_version": 2,
+        "template_quantity": 60,
+        "template_snapshot": {
+            "title": "Тренировка",
+            "proposed_points": 100,
+            "estimated_minutes": 60,
+            "pricing_mode": "PER_TIME",
+            "base_quantity": 20,
+            "unit_label": None,
+        },
+    }
+    assert draft_valid("TaskForm:draft", {"flow": 1, "key": "draft-key", **draft})
+    invalid = {**draft, "template_quantity": True}
+    assert not draft_valid("TaskForm:draft", {"flow": 1, "key": "draft-key", **invalid})

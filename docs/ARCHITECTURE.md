@@ -124,8 +124,8 @@ PostgreSQL. The first old-consumer upgrade requires the maintenance procedure in
 ## Schema and extension policy
 
 Migration connections pin `search_path=public` so a login named `taskflow` cannot confuse schema
-reflection. All application DDL remains explicitly schema-qualified. Current Alembic head is `0007`: initial schema, optional estimates, business guards, notification
-claim/delivery diagnostics, collaborative task roles, fixed-price templates, template soft deletion and task hierarchy/links. See [DATA_MODEL.md](DATA_MODEL.md) for fields, indexes and rollback limits.
+reflection. All application DDL remains explicitly schema-qualified. Current Alembic head is `0008`: initial schema, optional estimates, business guards, notification
+claim/delivery diagnostics, collaborative task roles, fixed and volume-priced templates, template soft deletion and task hierarchy/links. See [DATA_MODEL.md](DATA_MODEL.md) for fields, indexes and rollback limits.
 Add a new migration for schema changes; do not rewrite applied revisions or create provider UI tables.
 Change scoring/access/idempotency only with business and real PostgreSQL regression tests.
 Preserve the small MIT pagination attribution documented in [OPEN_SOURCE.md](OPEN_SOURCE.md).

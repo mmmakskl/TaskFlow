@@ -89,6 +89,7 @@ TEXT_STATES = {
     TaskForm.points.state,
     TemplateForm.field.state,
     TaskForm.estimate.state,
+    TaskForm.quantity.state,
     TaskForm.comment.state,
     TaskForm.comment_choice.state,
     TaskForm.edit.state,
@@ -113,6 +114,7 @@ REQUIRED = {
     PenaltyForm.confirm.state: {"target_id", "preview", "calculation_type"},
     SettingsForm.target.state: {"field"},
     SettingsForm.type_edit.state: {"type_id", "type_version", "field"},
+    TaskForm.quantity.state: {"template_id", "template_version", "template_snapshot"},
     ConfirmationForm.action.state: {"confirmation"},
 }
 
@@ -130,7 +132,11 @@ def new_fields_valid(current: str, data: dict[str, Any]) -> bool:
     if current.startswith("TaskForm:"):
         if "title" in data and not valid_text(data["title"], 200):
             return False
-        for field, maximum in (("proposed_points", 10000), ("estimated_minutes", 10080)):
+        for field, maximum in (
+            ("proposed_points", 10000),
+            ("estimated_minutes", 10080),
+            ("template_quantity", 10080),
+        ):
             if data.get(field) is not None and not valid_number(data[field], maximum):
                 return False
         if "peer_name" in data and not isinstance(data["peer_name"], str):
@@ -153,6 +159,30 @@ def new_fields_valid(current: str, data: dict[str, Any]) -> bool:
                 )
             ):
                 return False
+            if "pricing_mode" in snapshot:
+                mode = snapshot.get("pricing_mode")
+                if mode not in ("FIXED", "PER_TIME", "PER_QUANTITY"):
+                    return False
+                if mode == "FIXED":
+                    if any(
+                        snapshot.get(key) is not None for key in ("base_quantity", "unit_label")
+                    ):
+                        return False
+                else:
+                    maximum = 10080 if mode == "PER_TIME" else 10000
+                    if not valid_number(snapshot.get("base_quantity"), maximum):
+                        return False
+                    if mode == "PER_TIME" and snapshot.get("unit_label") is not None:
+                        return False
+                    if mode == "PER_QUANTITY" and not valid_text(snapshot.get("unit_label"), 40):
+                        return False
+            if data.get("template_quantity") is not None:
+                mode = snapshot.get("pricing_mode")
+                maximum = 10080 if mode == "PER_TIME" else 10000
+                if mode not in ("PER_TIME", "PER_QUANTITY") or not valid_number(
+                    data["template_quantity"], maximum
+                ):
+                    return False
         if "save_template" in data and type(data["save_template"]) is not bool:
             return False
         if data.get("save_template") and not valid_text(data.get("template_save_key"), 80):

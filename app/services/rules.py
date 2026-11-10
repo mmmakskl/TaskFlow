@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from app.utils.text import postgres_text
 
 
@@ -20,6 +22,25 @@ def positive_integer(value: object, maximum: int = 10000) -> int:
     if type(value) is not int or not 1 <= value <= maximum:
         raise DomainError(f"Введи целое число от 1 до {maximum:,}.")
     return value
+
+
+def template_points(mode: str, base_points: object, base_quantity: object, quantity: object) -> int:
+    points = rating_points(base_points)
+    if mode == "FIXED":
+        if base_quantity is not None or quantity is not None:
+            raise DomainError("Фиксированный шаблон не использует количество.")
+        return points
+    if mode not in ("PER_TIME", "PER_QUANTITY"):
+        raise DomainError("Неизвестный способ расчёта шаблона.")
+    maximum = 10080 if mode == "PER_TIME" else 10000
+    base = positive_integer(base_quantity, maximum)
+    amount = positive_integer(quantity, maximum)
+    calculated = int(
+        (Decimal(points) * Decimal(amount) / Decimal(base)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    return rating_points(calculated)
 
 
 def penalty_points(kind: str, rate: int, quantity: int | None, manual: int | None) -> int:

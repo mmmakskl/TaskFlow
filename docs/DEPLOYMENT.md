@@ -154,15 +154,15 @@ Use the supplied probe with a securely exported Render ENV file (mode 0600, outs
 
 ```sh
 venv/bin/python -m tools.deployment_probe --env-file /secure/path/production.env \
-  --revision 0007 --exercise-webhook --receipt /secure/path/first-deploy.json
+  --revision 0008 --exercise-webhook --receipt /secure/path/first-deploy.json
 # Render Manual Deploy → Deploy latest commit, then wait for Live again.
 venv/bin/python -m tools.deployment_probe --env-file /secure/path/production.env \
-  --revision 0007 --exercise-webhook --baseline /secure/path/first-deploy.json \
+  --revision 0008 --exercise-webhook --baseline /secure/path/first-deploy.json \
   --receipt /secure/path/after-redeploy.json
 ```
 
 The probe checks HTTPS endpoints, unsigned rejection, signed duplicate inbox processing, revision
-0007, Telegram getWebhookInfo and business-data fingerprints. Its signed test is an empty synthetic
+0008, Telegram getWebhookInfo and business-data fingerprints. Its signed test is an empty synthetic
 update with a reserved negative ID: it does not impersonate a user or send a chat message. A previous
 receipt's marker must still exist after redeploy. Receipts contain counts/hashes, never task text or
 secrets. Avoid changing business records between receipts when comparing their exact fingerprints.

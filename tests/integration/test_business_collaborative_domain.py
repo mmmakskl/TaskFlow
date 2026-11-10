@@ -350,7 +350,16 @@ async def test_malformed_template_snapshots_and_unknown_checks_reject(factory, s
         repo = TaskRepository(session)
         owner, peer = await repo.users()
         template = await session.scalar(select(TaskTemplate).limit(1))
-        valid = {"title": "English", "points": 500, "estimated_minutes": 60}
+        valid = {
+            "title": "English",
+            "points": 500,
+            "estimated_minutes": 60,
+            "pricing_mode": "FIXED",
+            "base_points": 500,
+            "base_quantity": None,
+            "unit_label": None,
+            "quantity": None,
+        }
         invalid = [
             (None, valid),
             (0, valid),

@@ -15,6 +15,7 @@ from app.bot.handlers.task_prompts import (
     draft_prompt,
     estimate_prompt,
     points_prompt,
+    quantity_prompt,
     target_prompt,
     title_prompt,
 )
@@ -28,6 +29,7 @@ from app.services.rules import (
     StaleAction,
     estimated_minutes,
     rating_points,
+    template_points,
     text_field,
 )
 from app.services.tasks import TaskService
@@ -57,6 +59,7 @@ async def save_task(
             proposed_points=data.get("proposed_points"),
             template_id=data.get("template_id"),
             template_version=data.get("template_version"),
+            template_quantity=data.get("template_quantity"),
         )
     except StaleAction:
         if not data.get("template_id"):
@@ -67,6 +70,9 @@ async def save_task(
             "title": template.title,
             "proposed_points": template.points,
             "estimated_minutes": template.estimated_minutes,
+            "pricing_mode": template.pricing_mode,
+            "base_quantity": template.base_quantity,
+            "unit_label": template.unit_label,
         }
         changes = {
             field: value for field, value in fresh.items() if data.get(field) == old.get(field)
@@ -75,6 +81,14 @@ async def save_task(
             changes,
             template_version=template.version if template.is_active else None,
             template_snapshot=fresh,
+            template_quantity=None
+            if template.pricing_mode != "FIXED"
+            else data.get("template_quantity"),
+            proposed_points=(
+                template.points
+                if template.pricing_mode != "FIXED" and data.get("template_id")
+                else data.get("proposed_points")
+            ),
             template_id=template.id if template.is_active else None,
         )
         await draft_prompt(
@@ -230,6 +244,7 @@ async def task_draft_callback(
             "title": title_prompt,
             "target": target_prompt,
             "points": points_prompt,
+            "template_quantity": quantity_prompt,
             "deadline": deadline_prompt,
             "estimate": estimate_prompt,
             "comment": comment_prompt,
@@ -581,6 +596,26 @@ async def save_template(bot: Bot, actor: User, state: FSMContext, ui: UIService)
     await draft_prompt(bot, actor, state, "📚 Шаблон сохранён. Черновик задачи сохранён.")
 
 
+async def template_quantity_input(
+    message: Message, bot: Bot, state: FSMContext, actor: User
+) -> None:
+    text = (message.text or "").strip()
+    if not text.isdecimal() or len(text) > 5:
+        raise DomainError("Введи целое количество.")
+    data = await state.get_data()
+    snapshot = data["template_snapshot"]
+    value = int(text)
+    points = template_points(
+        snapshot["pricing_mode"],
+        snapshot["proposed_points"],
+        snapshot["base_quantity"],
+        value,
+    )
+    await state.update_data(template_quantity=value, proposed_points=points)
+    await draft_prompt(bot, actor, state)
+    await discard_input(message)
+
+
 async def points_input(
     message: Message, bot: Bot, state: FSMContext, actor: User, ui: UIService
 ) -> None:
@@ -601,6 +636,7 @@ def create_router() -> Router:
     created.callback_query.register(new_task, Action.filter(F.name == "new"))
     created.message.register(title_input, TaskForm.title)
     created.message.register(estimate_input, TaskForm.estimate)
+    created.message.register(template_quantity_input, TaskForm.quantity)
     created.message.register(points_input, TaskForm.points)
     created.callback_query.register(
         task_draft_callback,

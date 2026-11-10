@@ -204,3 +204,64 @@ async def test_miniapp_epics_subtasks_links_and_progress(factory, settings) -> N
             json={"version": link.json()["version"], "operation_key": "api-unlink"},
         )
         assert removed.status_code == 200, removed.text
+
+
+async def test_volume_templates_and_weekly_trend_api(factory, settings) -> None:
+    app = create_app(settings, session_factory=factory, workers=False)
+    headers_max = {"Authorization": f"tma {init_data(settings, settings.user_max_id)}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        template_response = await client.post(
+            "/api/miniapp/templates",
+            headers=headers_max,
+            json={
+                "title": "Тренировка",
+                "points": 100,
+                "estimated_minutes": 60,
+                "pricing_mode": "PER_TIME",
+                "base_quantity": 20,
+                "operation_key": "volume-template-api",
+            },
+        )
+        assert template_response.status_code == 201, template_response.text
+        template = template_response.json()
+        assert template["pricing_mode"] == "PER_TIME" and template["base_quantity"] == 20
+
+        task_response = await client.post(
+            "/api/miniapp/tasks",
+            headers=headers_max,
+            json={
+                "title": "Тренировка",
+                "proposed_points": 300,
+                "estimated_minutes": 60,
+                "template_id": template["id"],
+                "template_version": template["version"],
+                "template_quantity": 60,
+                "operation_key": "volume-task-api",
+            },
+        )
+        assert task_response.status_code == 201, task_response.text
+        task = task_response.json()
+        assert task["status"] == "TODO" and task["points"] == 300
+        assert task["template_snapshot"]["quantity"] == 60
+
+        started = await client.post(
+            f"/api/miniapp/tasks/{task['id']}/actions",
+            headers=headers_max,
+            json={"version": task["version"], "status": "IN_PROGRESS"},
+        )
+        assert started.status_code == 200, started.text
+        completed = await client.post(
+            f"/api/miniapp/tasks/{task['id']}/actions",
+            headers=headers_max,
+            json={"version": started.json()["version"], "status": "DONE"},
+        )
+        assert completed.status_code == 200, completed.text
+
+        trend = await client.get("/api/miniapp/results/trend?weeks=4", headers=headers_max)
+        assert trend.status_code == 200
+        rows = trend.json()["weeks"]
+        assert len(rows) == 4 and rows == sorted(rows, key=lambda row: row["start_date"])
+        max_score = next(
+            score for score in rows[-1]["scores"] if score["name"] == settings.user_max_name
+        )
+        assert max_score["earned"] == 300 and max_score["net"] == 300
