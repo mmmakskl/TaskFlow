@@ -1,6 +1,22 @@
 # Independent QA / SRE release audit
 
-## Current release status — 2026-10-07
+## Current release status — 2026-11-10
+
+Mini App analytics and volume-priced templates are merged to `main` as `c6011b6` (PR #9).
+GitHub Actions CI run `42805685732` passed: **726 tests**, Ruff, mypy, dependency audit and
+production Docker build. Render is serving the exact release `index.html`, `miniapp.css` and
+`miniapp.js` assets (SHA-256 compared against the merged tree). `/health` and `/ready` return 200;
+the Mini App returns its HTML and the trend/template API routes resolve and require Telegram
+initData (401 without it). Since startup runs Alembic before Uvicorn, successful readiness after
+serving these assets is consistent with the 0008 migration having completed.
+
+The Render dashboard/browser and a production deployment-probe environment were unavailable during
+verification. Therefore the Render deployment ID/logs, direct database revision query,
+`getWebhookInfo`, and authenticated task/template mutations were not independently captured.
+No production business records were created or changed. Real two-account acceptance remains open.
+See [READINESS.md](READINESS.md) for exact HTTP and asset-hash evidence.
+
+## Prior collaborative/deadline release status — 2026-10-07
 
 The collaborative/deadline release is deployed on Render as commit
 `7cce3d1141c809e71b2895ced38dd50ff9f426df` (PR #5). CI run `37643282880` passed. Render deployment
