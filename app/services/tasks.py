@@ -12,6 +12,7 @@ from app.services.rules import (
     estimated_minutes,
     operation_key,
     rating_points,
+    template_points,
     text_field,
     transition,
 )
@@ -80,6 +81,7 @@ class TaskService(AuthorizedService):
         proposed_points: int | None = None,
         template_id: int | None = None,
         template_version: int | None = None,
+        template_quantity: int | None = None,
         parent_task_id: int | None = None,
         parent_version: int | None = None,
     ) -> Task:
@@ -131,6 +133,7 @@ class TaskService(AuthorizedService):
             raise DomainError("Подзадача должна использовать состав участников эпика.")
         proposal = rating_points(proposed_points) if proposed_points is not None else None
         template = None
+        calculated_points = proposal
         if template_id is not None:
             template = await self.repo.get(TaskTemplate, template_id, lock=True)
             if template.creator_user_id not in allowed:
@@ -140,13 +143,27 @@ class TaskService(AuthorizedService):
             self.repo.version(template, template_version)
             if not template.is_active:
                 raise StaleAction()
-        elif template_version is not None:
+            calculated_points = template_points(
+                template.pricing_mode,
+                template.points,
+                template.base_quantity,
+                template_quantity,
+            )
+            if (
+                template.pricing_mode != "FIXED"
+                and proposal is not None
+                and proposal != calculated_points
+            ):
+                raise DomainError("Цена шаблона изменилась. Пересчитай задачу и попробуй снова.")
+            if template.pricing_mode != "FIXED" or proposal is None:
+                proposal = calculated_points
+        elif template_version is not None or template_quantity is not None:
             raise DomainError("Не указан шаблон.")
         auto = bool(
             template
             and title == template.title
             and estimate == template.estimated_minutes
-            and proposal == template.points
+            and proposal == calculated_points
             and target != TaskTarget.PEER
         )
         task = Task(
@@ -163,7 +180,12 @@ class TaskService(AuthorizedService):
                 {
                     "title": template.title,
                     "estimated_minutes": template.estimated_minutes,
-                    "points": template.points,
+                    "points": calculated_points,
+                    "base_points": template.points,
+                    "pricing_mode": template.pricing_mode,
+                    "base_quantity": template.base_quantity,
+                    "unit_label": template.unit_label,
+                    "quantity": template_quantity,
                 }
                 if template
                 else None

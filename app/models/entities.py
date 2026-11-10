@@ -122,7 +122,41 @@ class Task(TimestampMixin, Base):
             "status <> 'DONE' OR (completed_at IS NOT NULL AND awarded_points IS NOT NULL)"
         ),
         CheckConstraint(
-            "((template_id IS NULL AND template_version IS NULL AND template_snapshot IS NULL) OR (template_id IS NOT NULL AND template_version IS NOT NULL AND template_version > 0 AND template_snapshot IS NOT NULL AND jsonb_typeof(template_snapshot) = 'object' AND jsonb_typeof(template_snapshot->'title') = 'string' AND length(template_snapshot->>'title') BETWEEN 1 AND 200 AND jsonb_typeof(template_snapshot->'points') = 'number' AND (template_snapshot->>'points')::integer BETWEEN 1 AND 10000 AND template_snapshot ? 'estimated_minutes' AND (jsonb_typeof(template_snapshot->'estimated_minutes') = 'null' OR (jsonb_typeof(template_snapshot->'estimated_minutes') = 'number' AND (template_snapshot->>'estimated_minutes')::integer BETWEEN 1 AND 10080)))) IS TRUE",
+            "((template_id IS NULL AND template_version IS NULL AND template_snapshot IS NULL) OR "
+            "(template_id IS NOT NULL AND template_version IS NOT NULL AND template_version > 0 "
+            "AND template_snapshot IS NOT NULL AND jsonb_typeof(template_snapshot) = 'object' "
+            "AND jsonb_typeof(template_snapshot->'title') = 'string' "
+            "AND length(template_snapshot->>'title') BETWEEN 1 AND 200 "
+            "AND jsonb_typeof(template_snapshot->'points') = 'number' "
+            "AND (template_snapshot->>'points')::integer BETWEEN 1 AND 10000 "
+            "AND template_snapshot ? 'estimated_minutes' AND "
+            "(jsonb_typeof(template_snapshot->'estimated_minutes') = 'null' OR "
+            "(jsonb_typeof(template_snapshot->'estimated_minutes') = 'number' AND "
+            "(template_snapshot->>'estimated_minutes')::integer BETWEEN 1 AND 10080)) "
+            "AND (NOT (template_snapshot ? 'pricing_mode') OR ("
+            "template_snapshot->>'pricing_mode' IN ('FIXED','PER_TIME','PER_QUANTITY') "
+            "AND jsonb_typeof(template_snapshot->'base_points') = 'number' "
+            "AND (template_snapshot->>'base_points')::integer BETWEEN 1 AND 10000 "
+            "AND template_snapshot ? 'base_quantity' AND template_snapshot ? 'unit_label' "
+            "AND template_snapshot ? 'quantity' "
+            "AND ((template_snapshot->>'pricing_mode' = 'FIXED' "
+            "AND template_snapshot->'base_quantity' = 'null'::jsonb "
+            "AND template_snapshot->'unit_label' = 'null'::jsonb "
+            "AND template_snapshot->'quantity' = 'null'::jsonb "
+            "AND (template_snapshot->>'points')::integer = (template_snapshot->>'base_points')::integer) "
+            "OR (template_snapshot->>'pricing_mode' = 'PER_TIME' "
+            "AND jsonb_typeof(template_snapshot->'base_quantity') = 'number' "
+            "AND (template_snapshot->>'base_quantity')::integer BETWEEN 1 AND 10080 "
+            "AND template_snapshot->'unit_label' = 'null'::jsonb "
+            "AND jsonb_typeof(template_snapshot->'quantity') = 'number' "
+            "AND (template_snapshot->>'quantity')::integer BETWEEN 1 AND 10080) "
+            "OR (template_snapshot->>'pricing_mode' = 'PER_QUANTITY' "
+            "AND jsonb_typeof(template_snapshot->'base_quantity') = 'number' "
+            "AND (template_snapshot->>'base_quantity')::integer BETWEEN 1 AND 10000 "
+            "AND jsonb_typeof(template_snapshot->'unit_label') = 'string' "
+            "AND length(template_snapshot->>'unit_label') BETWEEN 1 AND 40 "
+            "AND jsonb_typeof(template_snapshot->'quantity') = 'number' "
+            "AND (template_snapshot->>'quantity')::integer BETWEEN 1 AND 10000))))) IS TRUE",
             name="ck_tasks_template_snapshot",
         ),
         CheckConstraint(
@@ -221,6 +255,9 @@ class TaskTemplate(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     estimated_minutes: Mapped[int | None] = mapped_column(Integer)
     points: Mapped[int] = mapped_column(Integer)
+    pricing_mode: Mapped[str] = mapped_column(String(20), default="FIXED", server_default="FIXED")
+    base_quantity: Mapped[int | None] = mapped_column(Integer)
+    unit_label: Mapped[str | None] = mapped_column(String(40))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -233,6 +270,13 @@ class TaskTemplate(TimestampMixin, Base):
             name="ck_templates_effort",
         ),
         CheckConstraint("version > 0", name="ck_templates_version"),
+        CheckConstraint(
+            "(pricing_mode = 'FIXED' AND base_quantity IS NULL AND unit_label IS NULL) OR "
+            "(pricing_mode = 'PER_TIME' AND base_quantity BETWEEN 1 AND 10080 AND unit_label IS NULL) OR "
+            "(pricing_mode = 'PER_QUANTITY' AND base_quantity BETWEEN 1 AND 10000 "
+            "AND unit_label IS NOT NULL AND length(unit_label) BETWEEN 1 AND 40)",
+            name="ck_templates_pricing",
+        ),
     )
 
 

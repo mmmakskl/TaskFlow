@@ -106,3 +106,38 @@ def test_duration_label(value, label):
     from app.utils.duration import duration
 
     assert duration(value) == label
+
+
+@pytest.mark.parametrize(
+    "mode,base_points,base_quantity,quantity,expected",
+    [
+        ("FIXED", 100, None, None, 100),
+        ("PER_TIME", 100, 20, 60, 300),
+        ("PER_QUANTITY", 100, 1, 3, 300),
+        ("PER_TIME", 100, 20, 30, 150),
+        ("PER_TIME", 1, 2, 1, 1),
+    ],
+)
+def test_template_price_calculation(mode, base_points, base_quantity, quantity, expected):
+    from app.services.rules import template_points
+
+    assert template_points(mode, base_points, base_quantity, quantity) == expected
+
+
+@pytest.mark.parametrize(
+    "mode,base_points,base_quantity,quantity",
+    [
+        ("PER_TIME", 100, 20, None),
+        ("PER_QUANTITY", 100, 1, None),
+        ("FIXED", 100, None, 20),
+        ("PER_TIME", 100, 0, 60),
+        ("PER_TIME", 100, 20, 10081),
+        ("PER_TIME", 10000, 1, 2),
+        ("UNKNOWN", 100, None, None),
+    ],
+)
+def test_invalid_template_price_calculation(mode, base_points, base_quantity, quantity):
+    from app.services.rules import DomainError, template_points
+
+    with pytest.raises(DomainError):
+        template_points(mode, base_points, base_quantity, quantity)

@@ -265,7 +265,7 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
         task = await session.scalar(select(Task))
         assert task.title == "Existing task" and task.estimated_minutes is None
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0007"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0008"
         )
 
 

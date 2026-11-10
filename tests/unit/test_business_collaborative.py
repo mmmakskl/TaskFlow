@@ -269,3 +269,71 @@ async def test_mismatched_configured_user_roles_reject_create(business):
     business.vika.role = "rogue"
     with pytest.raises(DomainError):
         await business.tasks.create(business.max, "Task", "bad-role")
+
+
+async def test_volume_template_calculates_and_snapshots_task_reward(business):
+    service = await template_service(business)
+    template = await service.create(
+        business.max,
+        "Тренировка",
+        100,
+        "training-template",
+        60,
+        pricing_mode="PER_TIME",
+        base_quantity=20,
+    )
+    task = await business.tasks.create(
+        business.max,
+        "Тренировка",
+        "training-60-minutes",
+        estimate=60,
+        proposed_points=300,
+        template_id=template.id,
+        template_version=template.version,
+        template_quantity=60,
+    )
+    assert task.status == "TODO"
+    assert task.rated_points == 300
+    assert task.template_snapshot["base_points"] == 100
+    assert task.template_snapshot["quantity"] == 60
+
+
+async def test_fixed_template_keeps_existing_custom_price_proposal_flow(business):
+    service = await template_service(business)
+    template = await service.create(business.max, "Draft", 500, "fixed-template")
+    task = await business.tasks.create(
+        business.max,
+        "Draft",
+        "fixed-template-custom-price",
+        proposed_points=700,
+        template_id=template.id,
+        template_version=template.version,
+    )
+    assert task.status == "BACKLOG"
+    assert task.proposed_points == 700
+    assert task.template_snapshot["points"] == 500
+
+
+async def test_quantity_template_uses_its_named_unit(business):
+    service = await template_service(business)
+    template = await service.create(
+        business.max,
+        "Тренировки",
+        100,
+        "quantity-template",
+        pricing_mode="PER_QUANTITY",
+        base_quantity=1,
+        unit_label="занятие",
+    )
+    task = await business.tasks.create(
+        business.max,
+        "Тренировки",
+        "three-training-sessions",
+        proposed_points=300,
+        template_id=template.id,
+        template_version=template.version,
+        template_quantity=3,
+    )
+    assert task.rated_points == 300 and task.status == "TODO"
+    assert task.template_snapshot["quantity"] == 3
+    assert task.template_snapshot["unit_label"] == "занятие"

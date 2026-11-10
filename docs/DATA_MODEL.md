@@ -2,7 +2,7 @@
 
 All eleven application tables are in the `taskflow` PostgreSQL schema. The Alembic revision table is
 `public.alembic_version`. Migrations own schema, constraints, indexes and immutable-event triggers.
-Current head: **0007**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
+Current head: **0008**. Timestamps use PostgreSQL `timestamptz` (aware UTC in Python); JSON is JSONB.
 Schema separation is not a permission boundary: do not expose it through a public Data API.
 
 | Table | Responsibilities |
@@ -10,7 +10,7 @@ Schema separation is not a permission boundary: do not expose it through a publi
 | users | Unique Telegram identity, role, name, timezone, target, rating cooldown |
 | tasks | Owner/evaluator, text, deadline, optional estimated_minutes, status, rating, awarded snapshot, lifecycle timestamps, optional parent, version and operation key |
 | task_links | Active RELATED or directed DEPENDS_ON relationship, creator, operation key, version and soft-removal fields |
-| task_templates | Shared title, effort, fixed points, active/deleted flags, creator, version, operation and seed keys |
+| task_templates | Shared title, planned effort, fixed or volume-based price, unit, active/deleted flags, creator, version, operation and seed keys |
 | penalty_types | Live name/emoji/description, PER_MINUTE/FIXED/MANUAL calculation, rate, active flag, sort order, version and unique seed key |
 | penalties | Target/creator/type FKs, full type snapshots, quantity, points, comment, version, operation key and soft deletion |
 | audit_events | Actor, entity/action, old/new JSONB and timestamp; immutable |
@@ -137,3 +137,10 @@ matching parent/child participants; SQL prevents self-parenting. A partial uniqu
 active link for each task pair and kind. RELATED pairs are canonicalized; DEPENDS_ON rows point from
 blocker to dependent. Removed links are soft-deleted to retain audit history. Downgrade refuses while
 hierarchy or link data exists, since dropping it would lose relationships.
+
+
+## Volume-priced templates (revision 0008)
+
+Templates default to `FIXED`, preserving existing catalog rows. `PER_TIME` stores a base minute interval and `PER_QUANTITY` stores a base count plus a display unit. Template points are the price for that base volume. Mini App and bot task creation record the selected quantity in the task's immutable template snapshot and calculate the proposed price proportionally, rounding half up to an integer. Values above the existing task limit of 10,000 are rejected. Existing task snapshots remain byte-for-byte unchanged; the database constraint accepts both their legacy shape and the new snapshot shape.
+
+Downgrade refuses while volume-priced templates or snapshots in the new format exist, because the snapshot immutability trigger prevents rewriting their history.

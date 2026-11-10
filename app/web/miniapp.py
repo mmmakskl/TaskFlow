@@ -50,6 +50,7 @@ class TaskInput(BaseModel):
     operation_key: str = Field(min_length=1, max_length=80)
     template_id: int | None = Field(default=None, ge=1)
     template_version: int | None = Field(default=None, ge=1)
+    template_quantity: int | None = Field(default=None, ge=1, le=10080)
     parent_task_id: int | None = Field(default=None, ge=1)
     parent_version: int | None = Field(default=None, ge=1)
 
@@ -104,6 +105,9 @@ class TemplateInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     points: int = Field(ge=1, le=10000)
     estimated_minutes: int | None = Field(default=None, ge=1, le=10080)
+    pricing_mode: Literal["FIXED", "PER_TIME", "PER_QUANTITY"] = "FIXED"
+    base_quantity: int | None = Field(default=None, ge=1, le=10080)
+    unit_label: str | None = Field(default=None, min_length=1, max_length=40)
     operation_key: str = Field(min_length=1, max_length=80)
 
 
@@ -114,6 +118,9 @@ class TemplateEdit(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     points: int | None = Field(default=None, ge=1, le=10000)
     estimated_minutes: int | None = Field(default=None, ge=1, le=10080)
+    pricing_mode: Literal["FIXED", "PER_TIME", "PER_QUANTITY"] | None = None
+    base_quantity: int | None = Field(default=None, ge=1, le=10080)
+    unit_label: str | None = Field(default=None, min_length=1, max_length=40)
     is_active: bool | None = None
 
 
@@ -217,6 +224,7 @@ def task_json(task: Task, names: dict[int, str]) -> dict[str, Any]:
         "awarded_points": task.awarded_points,
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "estimated_minutes": task.estimated_minutes,
+        "template_snapshot": task.template_snapshot,
         "created_at": task.created_at.isoformat(),
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "rating_source": task.rating_source,
@@ -240,6 +248,9 @@ def template_json(template: TaskTemplate) -> dict[str, Any]:
         "title": template.title,
         "points": template.points,
         "estimated_minutes": template.estimated_minutes,
+        "pricing_mode": template.pricing_mode,
+        "base_quantity": template.base_quantity,
+        "unit_label": template.unit_label,
         "is_active": template.is_active,
         "is_deleted": template.is_deleted,
     }
@@ -540,6 +551,7 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             proposed_points=body.proposed_points,
             template_id=body.template_id,
             template_version=body.template_version,
+            template_quantity=body.template_quantity,
             parent_task_id=body.parent_task_id,
             parent_version=body.parent_version,
         )
@@ -687,6 +699,35 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             ],
         }
 
+    @router.get("/api/miniapp/results/trend")
+    async def result_trend(
+        weeks: int = Query(default=5),
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        _, _, result_service = services(session)
+        rows = await result_service.trend(weeks)
+        return {
+            "weeks": [
+                {
+                    "start_date": start_date,
+                    "label": label,
+                    "scores": [
+                        {
+                            "user_id": user.id,
+                            "name": user.display_name,
+                            "earned": earned,
+                            "lost": lost,
+                            "net": earned - lost,
+                            "target": user.weekly_target,
+                        }
+                        for user, earned, lost in scores
+                    ],
+                }
+                for start_date, label, scores in rows
+            ]
+        }
+
     @router.get("/api/miniapp/results/history")
     async def result_history(
         page: int = Query(default=0, ge=0, le=100000),
@@ -742,7 +783,14 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         service = TaskTemplateService(TaskTemplateRepository(session), settings)
         return template_json(
             await service.create(
-                actor, body.title, body.points, body.operation_key, body.estimated_minutes
+                actor,
+                body.title,
+                body.points,
+                body.operation_key,
+                body.estimated_minutes,
+                pricing_mode=body.pricing_mode,
+                base_quantity=body.base_quantity,
+                unit_label=body.unit_label,
             )
         )
 

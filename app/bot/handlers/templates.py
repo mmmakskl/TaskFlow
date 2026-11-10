@@ -157,6 +157,9 @@ async def template_actions(
                 "title": t.title,
                 "proposed_points": t.points,
                 "estimated_minutes": t.estimated_minutes,
+                "pricing_mode": t.pricing_mode,
+                "base_quantity": t.base_quantity,
+                "unit_label": t.unit_label,
             }
             await form(
                 state,

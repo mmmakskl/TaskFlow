@@ -29,6 +29,30 @@ class ResultService(AuthorizedService):
         ]
         return week_label(start, end, self.settings.default_timezone), scores
 
+    async def trend(
+        self, weeks: int = 5, at: datetime | None = None
+    ) -> list[tuple[str, str, list[tuple[User, int, int]]]]:
+        if type(weeks) is not int or weeks not in (4, 5, 8, 12):
+            raise DomainError("Недопустимый период статистики.")
+        timezone = self.settings.default_timezone
+        now = at or utcnow()
+        bounds = [week_bounds(now, timezone, offset) for offset in range(1 - weeks, 1)]
+        totals = await self.repo.weekly_totals(bounds[0][0], bounds[-1][1], timezone)
+        users = await self.user_repo.participants()
+        output = []
+        for start, end in bounds:
+            date = start.astimezone(ZoneInfo(timezone)).date().isoformat()
+            scores = [
+                (
+                    user,
+                    totals.get((date, user.id, "task"), 0),
+                    -totals.get((date, user.id, "penalty"), 0),
+                )
+                for user in users
+            ]
+            output.append((date, week_label(start, end, timezone), scores))
+        return output
+
     async def history(
         self, page: int
     ) -> tuple[list[tuple[str, list[tuple[User, int, int]]]], int, bool]:

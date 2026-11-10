@@ -8,6 +8,7 @@ class TaskForm(StatesGroup):
     title = State()
     deadline = State()
     estimate = State()
+    quantity = State()
     comment_choice = State()
     comment = State()
     edit = State()

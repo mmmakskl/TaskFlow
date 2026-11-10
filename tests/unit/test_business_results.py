@@ -106,3 +106,33 @@ async def test_invalid_result_pagination(business, value):
         await business.results.history(value)
     with pytest.raises(DomainError):
         await business.results.week(value)
+
+
+async def test_weekly_trend_returns_chronological_empty_weeks_and_ledger_totals(business):
+    b = business
+    start, _ = week_bounds(NOW, b.settings.default_timezone, -2)
+    for category, points, offset, key in (
+        ("task", 300, 1, "trend-earned"),
+        ("penalty", -50, 2, "trend-penalty"),
+    ):
+        b.session.add(
+            ScoreEvent(
+                user_id=b.max.id,
+                category=category,
+                points=points,
+                effective_at=start + timedelta(hours=offset),
+                operation_key=key,
+            )
+        )
+    await b.session.flush()
+    weeks = await b.results.trend(4)
+    assert len(weeks) == 4
+    assert [week[0] for week in weeks] == sorted(week[0] for week in weeks)
+    assert weeks[1][2][0][1:] == (300, 50)
+    assert weeks[0][2][0][1:] == (0, 0)
+
+
+@pytest.mark.parametrize("weeks", [0, 3, 6, 13, True, "5"])
+async def test_weekly_trend_rejects_unsupported_period(business, weeks):
+    with pytest.raises(DomainError):
+        await business.results.trend(weeks)

@@ -10,6 +10,7 @@ from app.bot.keyboards.forms import controls, minute_choices
 from app.bot.render import render, safe
 from app.bot.states.forms import TaskForm
 from app.models import User
+from app.services.rules import DomainError, template_points
 from app.utils.duration import duration
 
 
@@ -72,6 +73,27 @@ async def estimate_prompt(bot: Bot, actor: User, state: FSMContext) -> None:
     rows.append([button("Не указывать", "task_estimate", version=flow, value="none")])
     rows.append(controls("task_back", flow, "edit" if data.get("edit_id") else "draft"))
     await render(bot, actor.telegram_id, state, text, keyboard(*rows))
+
+
+async def quantity_prompt(bot: Bot, actor: User, state: FSMContext) -> None:
+    flow = await step(state, TaskForm.quantity)
+    data = await state.get_data()
+    snapshot = data["template_snapshot"]
+    mode = snapshot["pricing_mode"]
+    unit = "минут" if mode == "PER_TIME" else snapshot["unit_label"]
+    base = snapshot["base_quantity"]
+    current = data.get("template_quantity")
+    current_text = (
+        f"\n\nСейчас: {current} {unit} · {data['proposed_points']} баллов" if current else ""
+    )
+    await render(
+        bot,
+        actor.telegram_id,
+        state,
+        f"📐 <b>Фактический объём</b>\n\nВведи число {unit}. "
+        f"Ставка: {snapshot['proposed_points']} баллов за {base} {unit}.{current_text}",
+        keyboard(controls("task_back", flow, "draft")),
+    )
 
 
 async def comment_prompt(bot: Bot, actor: User, state: FSMContext) -> None:
@@ -153,9 +175,28 @@ async def draft_prompt(bot: Bot, actor: User, state: FSMContext, notice: str = "
     )
     if data.get("template_id"):
         snap = data["template_snapshot"]
-        unchanged = all(
-            data.get(field) == snap.get(field)
-            for field in ("title", "estimated_minutes", "proposed_points")
+        mode = snap.get("pricing_mode", "FIXED")
+        if mode != "FIXED":
+            unit = "мин." if mode == "PER_TIME" else safe(snap.get("unit_label", "ед."))
+            volume = data.get("template_quantity")
+            text += (
+                f"\n📐 Объём: {volume} {unit}" if volume else "\n📐 Укажи объём для расчёта баллов"
+            )
+            try:
+                expected = (
+                    template_points(mode, snap["proposed_points"], snap["base_quantity"], volume)
+                    if volume
+                    else None
+                )
+            except DomainError:
+                expected = None
+            price_unchanged = expected is not None and expected == data.get("proposed_points")
+        else:
+            price_unchanged = data.get("proposed_points") == snap.get("proposed_points")
+        unchanged = (
+            data.get("title") == snap.get("title")
+            and data.get("estimated_minutes") == snap.get("estimated_minutes")
+            and price_unchanged
         )
         text += "\n📚 Шаблон: " + ("готовая оценка" if unchanged else "изменён: нужна оценка")
     await render(
@@ -169,7 +210,12 @@ async def draft_prompt(bot: Bot, actor: User, state: FSMContext, notice: str = "
                 button("Для кого", "draft_field", version=flow, value="target"),
             ],
             [
-                button("Баллы", "draft_field", version=flow, value="points"),
+                *(
+                    [button("📐 Объём", "draft_field", version=flow, value="template_quantity")]
+                    if data.get("template_snapshot", {}).get("pricing_mode")
+                    in ("PER_TIME", "PER_QUANTITY")
+                    else [button("Баллы", "draft_field", version=flow, value="points")]
+                ),
                 button("Дедлайн", "draft_field", version=flow, value="deadline"),
             ],
             [
