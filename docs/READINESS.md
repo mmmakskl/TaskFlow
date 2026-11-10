@@ -1,5 +1,29 @@
 # Production readiness evidence
 
+## Mini App analytics / volume template release — 2026-11-10
+
+PR [#9](https://github.com/mmmakskl/TaskFlow/pull/9) merged to `main` as
+`c6011b6edb8f6baecc7d89f63e7e9cc87d777343`. GitHub Actions CI run
+[42805685732](https://github.com/mmmakskl/TaskFlow/actions/runs/42805685732) passed all checks:
+**726 tests**, Ruff lint/format, mypy, dependency audit, and production Docker build.
+
+Live HTTPS checks against `https://taskflow-private.onrender.com` after rollout:
+
+- `GET /health`: HTTP 200, `{"status":"ok"}` (the first request incurred a Free-tier cold start).
+- `GET /ready`: HTTP 200, `{"status":"ready"}`.
+- `GET /miniapp`, `/static/miniapp.css`, `/static/miniapp.js`: HTTP 200.
+- SHA-256 of all three served Mini App assets exactly matched the files in merge commit `c6011b6`.
+- Unauthenticated requests to `/api/miniapp/results/trend?weeks=5` and `/api/miniapp/templates`
+  returned 401 rather than 404, confirming route registration and Telegram initData enforcement.
+
+No production business record was written. The source startup path applies Alembic before Uvicorn;
+live readiness after the new bundle was served is consistent with migration 0008 having completed.
+The Render dashboard/browser was unavailable, so no deployment ID/log excerpt or direct database
+revision probe was captured. No production ENV export was present for `deployment_probe`; Telegram
+`getWebhookInfo`, webhook delivery, and authenticated Mini App mutations were not independently
+verified. Real two-account acceptance remains open. Do not treat this HTTP/asset check as proof of
+those deferred scenarios.
+
 ## Render startup failure — 2026-11-05
 
 Render deployment `dep-dbljokt9fdbs73dkmgb0` of `e01f11a` failed while startup migration code

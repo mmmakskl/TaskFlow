@@ -1,19 +1,16 @@
 # TaskFlow
 
 Private Telegram productivity app for Max and Vika: assign personal or shared tasks, agree on
-points, use fixed-price templates and track weekly results minus penalties. Both participants can
-view each other’s tasks and totals. The Russian interface uses compact screens, persistent quick
+points, use fixed, time-based or quantity-based templates, and track weekly results minus penalties.
+Both participants can view each other’s tasks and totals. The Russian interface uses compact screens, persistent quick
 actions, inline controls, a calendar and five-item lists. Task estimates, deadlines and comments are optional.
 Forms and all business data persist in PostgreSQL.
 
-**Release status:** the audited application is deployed on Render with schema 0004. Health,
-readiness, signed webhook processing and migration persistence pass. Real two-account Telegram
-acceptance remains deferred. See [fresh review](docs/PRODUCTION_REVIEW.md),
-[QA report](docs/QA_REPORT.md) and [release evidence](docs/READINESS.md).
-
-The collaborative-task update in this workspace uses schema **0005**. Its functionality and
-acceptance criteria are documented in [PRODUCT.md](docs/PRODUCT.md). Production deployment is a
-separate operation; the release evidence above describes the previously deployed revision.
+**Release status:** Mini App analytics and volume-priced templates were merged to `main` at
+`c6011b6` and verified live on Render on 2026-11-10. Alembic head is **0008**. Health/readiness
+return 200 and the live Mini App HTML, CSS and JS match the release assets. Authenticated Telegram
+flows and two-account acceptance remain separately unverified. See [release evidence](docs/READINESS.md),
+[QA report](docs/QA_REPORT.md) and [fresh review](docs/PRODUCTION_REVIEW.md).
 
 ## Architecture and repository map
 
