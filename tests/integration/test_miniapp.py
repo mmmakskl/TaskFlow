@@ -24,6 +24,100 @@ def init_data(settings, telegram_id: int) -> str:
     return urlencode(values)
 
 
+async def test_miniapp_searches_all_task_titles(factory, settings) -> None:
+    app = create_app(settings, session_factory=factory, workers=False)
+    headers = {"Authorization": f"tma {init_data(settings, settings.user_max_id)}"}
+    peer_headers = {"Authorization": f"tma {init_data(settings, settings.user_vika_id)}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.get("/api/miniapp/tasks/search?q=пи")).status_code == 401
+        outsider = {"Authorization": f"tma {init_data(settings, 9999)}"}
+        assert (
+            await client.get("/api/miniapp/tasks/search?q=пи", headers=outsider)
+        ).status_code == 403
+        titles = ("Написать диплом", "Пойти писать проект", "Пить пиво", "100% план", "План_1")
+        created = []
+        for index, title in enumerate(titles):
+            response = await client.post(
+                "/api/miniapp/tasks",
+                headers=headers,
+                json={"title": title, "target": "SELF", "operation_key": f"search-{index}"},
+            )
+            assert response.status_code == 201, response.text
+            created.append(response.json())
+
+        cancelled = await client.post(
+            f"/api/miniapp/tasks/{created[0]['id']}/actions",
+            headers=headers,
+            json={"version": created[0]["version"], "status": "CANCELLED", "confirmed": True},
+        )
+        assert cancelled.status_code == 200, cancelled.text
+        found = await client.get("/api/miniapp/tasks/search?q=ПИ", headers=headers)
+        assert found.status_code == 200, found.text
+        assert [item["title"] for item in found.json()["items"]] == [
+            "Пить пиво",
+            "Пойти писать проект",
+            "Написать диплом",
+        ]
+        assert found.json()["count"] == 3
+        assert found.json()["items"][-1]["status"] == "CANCELLED"
+        assert (await client.get("/api/miniapp/tasks/search?q=%25", headers=headers)).json()[
+            "count"
+        ] == 1
+        assert (await client.get("/api/miniapp/tasks/search?q=_", headers=headers)).json()[
+            "count"
+        ] == 1
+        peer_found = await client.get("/api/miniapp/tasks/search?q=пи", headers=peer_headers)
+        assert peer_found.status_code == 200 and peer_found.json()["count"] == 3
+
+        for index in range(3):
+            response = await client.post(
+                "/api/miniapp/tasks",
+                headers=headers,
+                json={
+                    "title": f"Пи тест {index}",
+                    "target": "SELF",
+                    "operation_key": f"search-page-{index}",
+                },
+            )
+            assert response.status_code == 201, response.text
+        first_page = (await client.get("/api/miniapp/tasks/search?q=пи", headers=headers)).json()
+        second_page = (
+            await client.get("/api/miniapp/tasks/search?q=пи&page=1", headers=headers)
+        ).json()
+        assert first_page["count"] == 6 and len(first_page["items"]) == 5
+        assert len(second_page["items"]) == 1
+
+        epic = await client.post(
+            "/api/miniapp/tasks",
+            headers=headers,
+            json={"title": "Родитель", "target": "SELF", "operation_key": "search-epic"},
+        )
+        assert epic.status_code == 201, epic.text
+        approved = await client.post(
+            f"/api/miniapp/tasks/{epic.json()['id']}/actions",
+            headers=peer_headers,
+            json={"version": epic.json()["version"], "status": "RATE", "points": 100},
+        )
+        assert approved.status_code == 200, approved.text
+        child = await client.post(
+            "/api/miniapp/tasks",
+            headers=headers,
+            json={
+                "title": "Особая подзадача",
+                "target": "SELF",
+                "operation_key": "search-child",
+                "parent_task_id": epic.json()["id"],
+                "parent_version": approved.json()["version"],
+            },
+        )
+        assert child.status_code == 201, child.text
+        child_result = (
+            await client.get("/api/miniapp/tasks/search?q=особая", headers=headers)
+        ).json()
+        assert child_result["count"] == 1
+        assert child_result["items"][0]["parent_task_id"] == epic.json()["id"]
+
+
 async def test_miniapp_auth_and_task_workflow(factory, settings) -> None:
     app = create_app(settings, session_factory=factory, workers=False)
     headers_max = {"Authorization": f"tma {init_data(settings, settings.user_max_id)}"}

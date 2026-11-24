@@ -456,6 +456,23 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         names = {u.id: u.display_name for u in await task_service.repo.users()}
         return {"items": [task_json(task, names) for task in eligible]}
 
+    @router.get("/api/miniapp/tasks/search")
+    async def task_search(
+        q: str = Query(min_length=1, max_length=100),
+        page: int = Query(default=0, ge=0, le=100000),
+        actor: User = Depends(actor_dependency),
+        session: AsyncSession = Depends(session_dependency),
+    ) -> dict[str, Any]:
+        task_service, _, _ = services(session)
+        rows, count = await task_service.repo.search(actor, q, page)
+        names = {user.id: user.display_name for user in await task_service.repo.users()}
+        return {
+            "items": [task_json(task, names) for task in rows],
+            "count": count,
+            "page": min(page, max(0, (count - 1) // 5)),
+            "page_size": 5,
+        }
+
     @router.get("/api/miniapp/tasks/{task_id}")
     async def task_detail(
         task_id: int,
