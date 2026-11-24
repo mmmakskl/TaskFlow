@@ -1,5 +1,6 @@
 const tg = window.Telegram?.WebApp;
-const state = { page: "home", scope: "mine", filter: "all", pageIndex: 0, templatePage: 0, week: 0, historyPage: 0 };
+const state = { page: "home", scope: "mine", filter: "all", pageIndex: 0, searchQuery: "", searchPage: 0, searchSerial: 0, templatePage: 0, week: 0, historyPage: 0 };
+let searchTimer;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const fmt = value => Number(value || 0).toLocaleString("ru-RU");
 const requestKey = () => crypto.randomUUID();
@@ -14,6 +15,7 @@ const statusInfo = {
 const iconPaths = {
   home: '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   tasks: '<rect x="4" y="4" width="16" height="17" rx="3"/><path d="M8 9h8M8 13h8M8 17h4"/>',
+  search: '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   inbox: '<path d="M4 5h16v14H4z"/><path d="M4 13h4l2 3h4l2-3h4"/>',
   stars: '<path d="m12 3 2.4 5.1 5.6.8-4 3.9.9 5.6-4.9-2.7-4.9 2.7.9-5.6-4-3.9 5.6-.8z"/>',
@@ -102,13 +104,55 @@ async function homePage() {
   document.getElementById("view").innerHTML = `<div class="greeting"><div><div class="eyebrow">${esc(data.week.label)}</div><h1>Привет, ${esc(data.user.name)} 👋</h1></div><div class="week-chip">Эта неделя</div></div><section class="hero"><div class="hero-head"><div><div class="hero-label">ТВОЙ РЕЗУЛЬТАТ ЗА НЕДЕЛЮ</div><div class="hero-total">${fmt(own.net)} <small>/ ${fmt(own.target)} ✦</small></div></div><div class="goal-ring"><span>${percent}%</span></div></div><div class="progress"><i style="width:${percent}%"></i></div><div class="hero-foot"><span>${icon("check",14)} Задачи +${fmt(own.earned)}</span><span>${icon("warning",14)} Штрафы −${fmt(own.lost)}</span></div></section><div class="duo">${data.week.scores.map(s => personCard(s, data.user.id)).join("")}</div><div class="section-head"><h2>Мой фокус</h2><button class="text-btn" onclick="go('tasks')">Все задачи →</button></div><div class="metrics"><div class="stat"><div class="stat-icon">${icon("pin")}</div><div class="stat-num">${data.active_count}</div><div class="stat-label">Активные</div></div><div class="stat"><div class="stat-icon">${icon("inbox")}</div><div class="stat-num">${data.pending_count}</div><div class="stat-label">Согласование</div></div><div class="stat"><div class="stat-icon">✦</div><div class="stat-num">${fmt(own.net)}</div><div class="stat-label">Баллы недели</div></div></div><div class="section-head"><h2>Текущие задачи</h2><button class="text-btn" onclick="go('tasks')">Смотреть все →</button></div>${active.length ? active.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>План свободен. Создай задачу или открой входящие.</div>`}<div class="section-head"><h2>Быстрый доступ</h2></div><div class="shortcuts"><button class="shortcut" onclick="go('inbox')"><span class="tile">${icon("inbox",18)}</span><span>Входящие<small>${data.pending_count} ждут ответа</small></span></button><button class="shortcut" onclick="go('templates')"><span class="tile">${icon("book")}</span><span>Шаблоны<small>Создать быстрее</small></span></button><button class="shortcut" onclick="go('penalties')"><span class="tile">${icon("warning")}</span><span>Штрафы<small>Список и типы</small></span></button><button class="shortcut" onclick="go('settings')"><span class="tile">${icon("settings")}</span><span>Настройки<small>Цель и часовой пояс</small></span></button></div>`;
 }
 async function tasksPage() {
-  const params = new URLSearchParams({ scope: state.scope, filter: state.filter, page: state.pageIndex });
-  const data = await api(`/api/miniapp/tasks?${params}`);
+  const searching = !!state.searchQuery.trim();
+  const params = searching
+    ? new URLSearchParams({ q: state.searchQuery.trim(), page: state.searchPage })
+    : new URLSearchParams({ scope: state.scope, filter: state.filter, page: state.pageIndex });
+  const data = await api(`/api/miniapp/tasks${searching ? "/search" : ""}?${params}`);
   const summary = data.summary;
-  document.getElementById("view").innerHTML = `<h1 class="page-title">Задачи</h1><p class="sub">Общий план для вас двоих</p>${summary ? `<div class="summary-row"><div class="summary-pill"><strong>${fmt(summary.todo_points)}</strong> к выполнению</div><div class="summary-pill"><strong>${fmt(summary.in_progress_points)}</strong> в работе</div><div class="summary-pill"><strong>${fmt(summary.planned_points)}</strong> план ✦</div></div>` : ""}<div class="tabscope">${[["mine","Мои"],["peer","Партнёра"],["shared","Общие"],["assigned","Создал"]].map(([key,label]) => `<button class="${state.scope === key ? "active" : ""}" onclick="setScope('${key}')">${label}</button>`).join("")}</div><div class="filters">${[["all","Все"],["active","Активные"],["work","В работе"],["backlog","Согласование"],["done","Готово"],["archive","Архив"],["overdue","Просроченные"]].map(([key,label]) => `<button class="${state.filter === key ? "active" : ""}" onclick="setFilter('${key}')">${label}</button>`).join("")}</div>${data.items.length ? data.items.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>Здесь пока нет задач</div>`}<div class="modal-actions"><button class="secondary" ${data.page <= 0 ? "disabled" : ""} onclick="turnPage(-1)">← Назад</button><span class="summary-pill">${data.page + 1} · ${Math.max(1, Math.ceil(data.count / 5))}</span><button class="secondary" ${((data.page + 1) * 5 >= data.count) ? "disabled" : ""} onclick="turnPage(1)">Далее →</button></div><button class="primary" style="margin-top:14px" onclick="openTaskForm()">＋ Новая задача</button>`;
+  document.getElementById("view").innerHTML = `<h1 class="page-title">Задачи</h1><p class="sub">Общий план для вас двоих</p>
+    <div class="task-search">${icon("search", 20)}<input id="taskSearch" type="search" maxlength="100" autocomplete="off" aria-label="Поиск задач" placeholder="Найти задачу по названию" value="${esc(state.searchQuery)}" oninput="onTaskSearch(this.value)"><button id="clearTaskSearch" class="task-search-clear" aria-label="Очистить поиск" onclick="clearTaskSearch()" ${searching ? "" : "hidden"}>×</button></div>
+    ${summary ? `<div class="summary-row"><div class="summary-pill"><strong>${fmt(summary.todo_points)}</strong> к выполнению</div><div class="summary-pill"><strong>${fmt(summary.in_progress_points)}</strong> в работе</div><div class="summary-pill"><strong>${fmt(summary.planned_points)}</strong> план ✦</div></div>` : ""}
+    <div class="tabscope">${[["mine","Мои"],["peer","Партнёра"],["shared","Общие"],["assigned","Создал"]].map(([key,label]) => `<button class="${state.scope === key ? "active" : ""}" onclick="setScope('${key}')">${label}</button>`).join("")}</div>
+    <div class="filters">${[["all","Все"],["active","Активные"],["work","В работе"],["backlog","Согласование"],["done","Готово"],["archive","Архив"],["overdue","Просроченные"]].map(([key,label]) => `<button class="${state.filter === key ? "active" : ""}" onclick="setFilter('${key}')">${label}</button>`).join("")}</div>
+    <div id="taskResults">${taskResultsMarkup(data, searching)}</div><button class="primary" style="margin-top:14px" onclick="openTaskForm()">＋ Новая задача</button>`;
 }
-function setScope(value) { state.scope = value; state.pageIndex = 0; render(); }
-function setFilter(value) { state.filter = value; state.pageIndex = 0; render(); }
+function taskResultsMarkup(data, searching) {
+  const items = data.items.length ? data.items.map(searching ? searchTaskRow : taskRow).join("")
+    : `<div class="empty"><b>${icon("search",32)}</b>${searching ? "Совпадений не найдено" : "Здесь пока нет задач"}</div>`;
+  return `${searching ? `<p class="search-count">Найдено: ${fmt(data.count)}</p>` : ""}${items}<div class="modal-actions"><button class="secondary" ${data.page <= 0 ? "disabled" : ""} onclick="${searching ? "turnSearchPage" : "turnPage"}(-1)">← Назад</button><span class="summary-pill">${data.page + 1} · ${Math.max(1, Math.ceil(data.count / 5))}</span><button class="secondary" ${(data.page + 1) * 5 >= data.count ? "disabled" : ""} onclick="${searching ? "turnSearchPage" : "turnPage"}(1)">Далее →</button></div>`;
+}
+function searchTaskRow(task) {
+  const [label, color] = statusInfo[task.status] || statusInfo.BACKLOG;
+  return `<article class="task-card" onclick="taskDetail(${task.id})"><div class="check" aria-hidden="true"></div><div class="task-body"><div class="task-title">${esc(task.title)}</div><div class="task-meta"><span class="badge ${color}">${label}</span><span>${esc(task.owner)}</span>${task.parent_task_id ? `<span>· Подзадача</span>` : ""}</div></div>${task.points ? `<div class="task-points">✦ ${fmt(task.points)}</div>` : ""}</article>`;
+}
+function onTaskSearch(value) {
+  state.searchQuery = value;
+  state.searchPage = 0;
+  const serial = ++state.searchSerial;
+  clearTimeout(searchTimer);
+  document.getElementById("clearTaskSearch").hidden = !value.trim();
+  document.getElementById("taskResults").innerHTML = `<div class="empty">${value.trim() ? "Ищу задачи…" : "Загружаю задачи…"}</div>`;
+  searchTimer = setTimeout(() => refreshTaskResults(serial), value.trim() ? 250 : 0);
+}
+async function refreshTaskResults(serial = ++state.searchSerial) {
+  const query = state.searchQuery.trim();
+  const params = query
+    ? new URLSearchParams({ q: query, page: state.searchPage })
+    : new URLSearchParams({ scope: state.scope, filter: state.filter, page: state.pageIndex });
+  try {
+    const data = await api(`/api/miniapp/tasks${query ? "/search" : ""}?${params}`);
+    if (serial !== state.searchSerial || state.page !== "tasks") return;
+    document.getElementById("taskResults").innerHTML = taskResultsMarkup(data, !!query);
+  } catch (error) {
+    if (serial === state.searchSerial && state.page === "tasks")
+      document.getElementById("taskResults").innerHTML = `<div class="empty">${esc(error.message)}</div>`;
+  }
+}
+function clearTaskSearch() { document.getElementById("taskSearch").value = ""; onTaskSearch(""); document.getElementById("taskSearch").focus(); }
+function turnSearchPage(delta) { state.searchPage = Math.max(0, state.searchPage + delta); refreshTaskResults(); }
+function setScope(value) { state.scope = value; state.pageIndex = 0; state.searchQuery = ""; ++state.searchSerial; render(); }
+function setFilter(value) { state.filter = value; state.pageIndex = 0; state.searchQuery = ""; ++state.searchSerial; render(); }
 function turnPage(delta) { state.pageIndex = Math.max(0, state.pageIndex + delta); render(); }
 
 async function taskDetail(id) {

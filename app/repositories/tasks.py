@@ -3,7 +3,7 @@ from __future__ import annotations
 import builtins
 from dataclasses import dataclass
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import AuditEvent, ScoreEvent, Task, TaskLink, TaskTemplate, User
@@ -36,6 +36,33 @@ FILTERS = {
 
 
 class TaskRepository(Repository):
+    async def search(self, actor: User, query: str, page: int = 0) -> tuple[list[Task], int]:
+        if type(page) is not int or not 0 <= page <= 100000:
+            raise DomainError("Недопустимая страница.")
+        term = query.strip()
+        if not term or len(term) > 100:
+            raise DomainError("Введите название задачи длиной до 100 символов.")
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        contains = f"%{escaped}%"
+        starts = f"{escaped}%"
+        word_starts = f"% {escaped}%"
+        conditions = (
+            Task.deleted_at.is_(None),
+            self.visible(),
+            Task.title.ilike(contains, escape="\\"),
+        )
+        count = int(await self.session.scalar(select(func.count(Task.id)).where(*conditions)) or 0)
+        page = min(page, max(0, (count - 1) // 5))
+        rank = case(
+            (Task.title.ilike(starts, escape="\\"), 0),
+            (Task.title.ilike(word_starts, escape="\\"), 1),
+            else_=2,
+        )
+        rows = await self.session.scalars(
+            select(Task).where(*conditions).order_by(rank, Task.id.desc()).offset(page * 5).limit(5)
+        )
+        return list(rows), count
+
     async def list(
         self,
         actor: User,
