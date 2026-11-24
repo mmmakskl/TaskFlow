@@ -117,13 +117,13 @@ async function taskDetail(id) {
     const [label,color] = statusInfo[t.status];
     const actions = [];
     if (t.is_evaluator) actions.push(`<button class="primary" onclick="openRate(${t.id},${t.version},${t.proposed_points || "null"})">${icon("stars",16)} Оценить / принять</button>`);
-    if (t.status === "TODO" && t.can_manage) actions.push(`<button class="primary" onclick="closeModal();taskAction(${t.id},${t.version},'IN_PROGRESS')">${icon("play",16)} Начать</button>`);
-    if (["TODO","IN_PROGRESS"].includes(t.status) && t.can_manage && !t.blockers.length && (!t.children.length || t.subtask_summary.done_count === t.children.length)) actions.push(`<button class="primary" onclick="closeModal();confirmTaskAction(${t.id},${t.version},'DONE')">✓ Выполнено</button>`);
+    if (t.status === "TODO" && t.can_manage) actions.push(`<button class="primary" onclick="taskAction(${t.id},${t.version},'IN_PROGRESS')">${icon("play",16)} Начать</button>`);
+    if (["TODO","IN_PROGRESS"].includes(t.status) && t.can_manage && !t.blockers.length && (!t.children.length || t.subtask_summary.done_count === t.children.length)) actions.push(`<button class="primary" onclick="confirmTaskAction(${t.id},${t.version},'DONE')">✓ Выполнено</button>`);
     if (["TODO","IN_PROGRESS"].includes(t.status) && t.can_manage && (t.blockers.length || (t.children.length && t.subtask_summary.done_count !== t.children.length))) actions.push(`<div class="summary-pill">${t.blockers.length ? "Сначала выполните задачи, от которых зависит эта" : "Завершите все подзадачи, чтобы закрыть эпик"}</div>`);
-    if (t.status === "IN_PROGRESS" && t.can_manage) actions.push(`<button class="secondary" onclick="closeModal();taskAction(${t.id},${t.version},'TODO')">${icon("pin",16)} К выполнению</button>`);
+    if (t.status === "IN_PROGRESS" && t.can_manage) actions.push(`<button class="secondary" onclick="taskAction(${t.id},${t.version},'TODO')">${icon("pin",16)} К выполнению</button>`);
     if (t.status === "DONE" && t.can_manage && !t.blocked_by_parent) {
-      actions.push(`<button class="secondary" onclick="closeModal();confirmTaskAction(${t.id},${t.version},'TODO')">${icon("undo",16)} К выполнению</button>`);
-      actions.push(`<button class="secondary" onclick="closeModal();confirmTaskAction(${t.id},${t.version},'IN_PROGRESS')">${icon("play",16)} Вернуть в работу</button>`);
+      actions.push(`<button class="secondary" onclick="confirmTaskAction(${t.id},${t.version},'TODO')">${icon("undo",16)} К выполнению</button>`);
+      actions.push(`<button class="secondary" onclick="confirmTaskAction(${t.id},${t.version},'IN_PROGRESS')">${icon("play",16)} Вернуть в работу</button>`);
     }
     if (t.blocked_by_parent) actions.push(`<div class="summary-pill">Сначала откройте эпик «${esc(t.parent.title)}», чтобы переоткрыть подзадачу</div>`);
     if (t.can_rerate) actions.push(`<button class="secondary" onclick="openRate(${t.id},${t.version},${t.points},true)">Изменить оценку</button>`);
@@ -133,7 +133,7 @@ async function taskDetail(id) {
       : `<div class="section-head"><h2>Подзадачи · ${t.subtask_summary.done_count}/${t.subtask_summary.count}</h2></div><div class="panel"><div class="setting-row"><span>Прогресс</span><b>${t.subtask_summary.progress}%</b></div><div class="setting-row"><span>Сумма согласованных оценок</span><b>✦ ${fmt(t.subtask_summary.agreed_points)}</b></div><div class="setting-row"><span>Бонус эпика</span><b>${t.bonus_points ? `✦ ${fmt(t.bonus_points)}` : "Согласуется отдельно"}</b></div></div>${t.children.map(c => {const [cl,cc]=statusInfo[c.status]||statusInfo.BACKLOG;return `<div class="task-card" onclick="taskDetail(${c.id})"><div class="task-body"><div class="task-title">${esc(c.title)}</div><div class="task-meta"><span class="badge ${cc}">${cl}</span><span>${c.points ? `✦ ${fmt(c.points)}` : "Оценка на согласовании"}</span></div></div>${t.can_manage && !["DONE","CANCELLED"].includes(t.status)?`<button class="text-btn" onclick="event.stopPropagation();detachSubtask(${t.id},${t.version},${c.id},${c.version})">Убрать</button>`:""}</div>`}).join("")}${t.can_manage && !["DONE","CANCELLED"].includes(t.status) ? `<button class="primary" style="margin-top:8px" onclick="createSubtask(${t.id},${t.version})">＋ Создать подзадачу</button><button class="secondary" style="margin-top:8px" onclick="attachSubtaskForm(${t.id},${t.version})">↳ Добавить существующую задачу</button>` : ""}`;
     const blockerSection = t.blockers.length ? `<div class="section-head"><h2>Заблокировано</h2></div><div class="panel">${t.blockers.map(b=>`<div class="setting-row"><span>${esc(b.title)}</span><b>${statusInfo[b.status]?.[0]||b.status}</b></div>`).join("")}</div>` : "";
     const linkSection = `<div class="section-head"><h2>Связанные задачи</h2></div><div class="panel">${t.links.map(link=>`<div class="setting-row"><button class="text-btn" onclick="taskDetail(${link.task_id})">${link.kind === "DEPENDS_ON" ? "Зависит от" : "Связана с"}: ${esc(link.title)}</button>${t.can_manage?`<button class="text-btn" onclick="removeTaskLink(${link.id},${link.version},${t.id})">Убрать</button>`:""}</div>`).join("")||`<div class="setting-row"><span>Пока нет связей</span></div>`}</div>${t.can_manage ? `<button class="secondary" style="margin-top:8px" onclick="createTaskLinkForm(${t.id},${t.version})">＋ Связать задачу</button>` : ""}`;
-    openModal("Задача", `<div class="badge ${color}">${label}</div><h2 style="font-size:20px;margin:12px 0">${esc(t.title)}</h2><div class="panel"><div class="setting-row"><span>Исполнители</span><b>${esc(t.participants.join(", "))}</b></div><div class="setting-row"><span>Оценка</span><b>${t.points ? `✦ ${fmt(t.points)}${t.kind === "SHARED" ? " каждому" : ""}` : "На оценку"}</b></div><div class="setting-row"><span>Дедлайн</span><b>${t.deadline ? esc(formatDate(t.deadline,{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})) : "Без срока"}</b></div><div class="setting-row"><span>План</span><b>${t.estimated_minutes || "—"} мин.</b></div><div class="setting-row"><span>Предложил</span><b>${esc(t.proposal_by)}</b></div>${t.awarded_points ? `<div class="setting-row"><span>Начислено</span><b>✦ ${fmt(t.awarded_points)}</b></div>` : ""}${t.template_snapshot?.quantity ? `<div class="setting-row"><span>Объём по шаблону</span><b>${esc(templateVolumeText(t.template_snapshot))}</b></div>` : ""}</div>${t.comment ? `<p class="sub" style="margin-top:12px">${esc(t.comment)}</p>` : ""}${blockerSection}${subtaskSection}${linkSection}<div style="display:grid;gap:8px;margin-top:14px">${actions.join("")}${editable ? `<button class="secondary" onclick="openTaskForm(${t.id})">${icon("edit",16)} Изменить</button>` : ""}${editable ? `<button class="danger" onclick="closeModal();confirmTaskAction(${t.id},${t.version},'CANCELLED')">В архив</button>` : ""}</div>`);
+    openModal("Задача", `<div class="badge ${color}">${label}</div><h2 style="font-size:20px;margin:12px 0">${esc(t.title)}</h2><div class="panel"><div class="setting-row"><span>Исполнители</span><b>${esc(t.participants.join(", "))}</b></div><div class="setting-row"><span>Оценка</span><b>${t.points ? `✦ ${fmt(t.points)}${t.kind === "SHARED" ? " каждому" : ""}` : "На оценку"}</b></div><div class="setting-row"><span>Дедлайн</span><b>${t.deadline ? esc(formatDate(t.deadline,{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})) : "Без срока"}</b></div><div class="setting-row"><span>План</span><b>${t.estimated_minutes || "—"} мин.</b></div><div class="setting-row"><span>Предложил</span><b>${esc(t.proposal_by)}</b></div>${t.awarded_points ? `<div class="setting-row"><span>Начислено</span><b>✦ ${fmt(t.awarded_points)}</b></div>` : ""}${t.template_snapshot?.quantity ? `<div class="setting-row"><span>Объём по шаблону</span><b>${esc(templateVolumeText(t.template_snapshot))}</b></div>` : ""}</div>${t.comment ? `<p class="sub" style="margin-top:12px">${esc(t.comment)}</p>` : ""}${blockerSection}${subtaskSection}${linkSection}<div style="display:grid;gap:8px;margin-top:14px">${actions.join("")}${editable ? `<button class="secondary" onclick="openTaskForm(${t.id})">${icon("edit",16)} Изменить</button>` : ""}${editable ? `<button class="danger" onclick="confirmTaskAction(${t.id},${t.version},'CANCELLED')">В архив</button>` : ""}</div>`);
   } catch (error) { toast(error.message); }
 }
 function templateUsageField(template) {
@@ -234,9 +234,17 @@ function confirmTaskAction(id, version, action) {
   confirmDialog(t,d,"Подтвердить",() => taskAction(id,version,action,true),action === "CANCELLED");
 }
 async function taskAction(id, version, action, confirmed = false, points = null) {
-  try { await api(`/api/miniapp/tasks/${id}/actions`, { method:"POST", body:{version,status:action,confirmed,points} });
-    toast("Изменения сохранены"); render(); }
-  catch (error) { toast(error.message); }
+  const keepTaskOpen = ["TODO", "IN_PROGRESS", "DONE", "CANCELLED"].includes(action);
+  try {
+    await api(`/api/miniapp/tasks/${id}/actions`, { method:"POST", body:{version,status:action,confirmed,points} });
+    toast("Изменения сохранены");
+    await render();
+    if (keepTaskOpen) await taskDetail(id);
+  }
+  catch (error) {
+    toast(error.message);
+    if (keepTaskOpen) await taskDetail(id);
+  }
 }
 function openRate(id, version, proposed, rerate = false) {
   const amount = proposed || 500;
