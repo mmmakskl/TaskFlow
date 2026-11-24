@@ -1,6 +1,15 @@
 # Independent QA / SRE release audit
 
-## Current release status — 2026-11-10
+## Task search release — 2026-11-24
+
+PR [#11](https://github.com/mmmakskl/TaskFlow/pull/11) merged task-title search into `main` as
+`fc5bd8b`. Local `make check` passed 727 tests; GitHub CI passed tests, lint, types, dependency
+audit and production Docker build. Render auto-deploy of that commit succeeded on the active
+`taskflow-duo` service. Live health/readiness and the exact Mini App HTML, CSS and JS were verified;
+authenticated production search remains a separate acceptance check. See
+[READINESS.md](READINESS.md) for the release and service IDs.
+
+## Prior analytics release status — 2026-11-10
 
 Mini App analytics and volume-priced templates are merged to `main` as `c6011b6` (PR #9).
 GitHub Actions CI run `42805685732` passed: **726 tests**, Ruff, mypy, dependency audit and
