@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: taskflow-private
+    name: taskflow-duo
     runtime: docker
     branch: main
     plan: free

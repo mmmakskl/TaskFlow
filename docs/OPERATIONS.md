@@ -20,8 +20,8 @@ the Supabase SQL editor as a workaround.
 2. Check endpoints without secrets:
 
    ```sh
-   curl --fail --max-time 90 https://taskflow-private.onrender.com/health
-   curl --fail --max-time 90 https://taskflow-private.onrender.com/ready
+   curl --fail --max-time 90 https://taskflow-duo.onrender.com/health
+   curl --fail --max-time 90 https://taskflow-duo.onrender.com/ready
    ```
 
 3. Inspect Render Logs for `migration_complete`, `webhook_configured`, `update_failed`,
