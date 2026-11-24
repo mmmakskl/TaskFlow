@@ -5,12 +5,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 FROM dependencies AS test
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql ca-certificates nodejs && rm -rf /var/lib/apt/lists/*
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 COPY . .
 RUN pip-audit -r requirements.txt --disable-pip --no-deps
 RUN ruff check app tests alembic tools && ruff format --check app tests alembic tools && mypy app
+RUN node --test tests/js/*.test.cjs
 RUN install -d -o postgres /tmp/taskflow-pg && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/initdb -D /tmp/taskflow-pg -A trust --encoding=UTF8 && \
     runuser -u postgres -- /usr/lib/postgresql/15/bin/pg_ctl -D /tmp/taskflow-pg -l /tmp/taskflow-pg.log -o "-h 127.0.0.1" start && \

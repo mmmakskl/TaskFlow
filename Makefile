@@ -6,6 +6,7 @@ dev:
 	venv/bin/pip install -r requirements-dev.txt
 test:
 	$(PYTHON) -m pytest -q
+	node --test tests/js/*.test.cjs
 test-business-unit:
 	$(PYTHON) -m pytest -q tests/unit/test_business_*.py
 test-business: test-business-unit
@@ -14,6 +15,7 @@ test-business: test-business-unit
 test-ux:
 	@test -n "$$TEST_DATABASE_URL" || (echo 'TEST_DATABASE_URL is required (disposable _test database)'; exit 1)
 	$(PYTHON) -m pytest -q tests/unit/test_interaction.py tests/integration/test_mobile_ux.py tests/integration/test_form_navigation.py tests/integration/test_web_and_bot.py
+	node --test tests/js/*.test.cjs
 lint:
 	$(PYTHON) -m ruff check app tests alembic tools
 	$(PYTHON) -m ruff format --check app tests alembic tools
