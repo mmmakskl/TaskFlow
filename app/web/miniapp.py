@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -37,6 +37,15 @@ from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
+STATIC_ASSETS = ("miniapp.css", "activity.js", "miniapp.js")
+
+
+def miniapp_html() -> str:
+    html = STATIC_INDEX.read_text(encoding="utf-8")
+    for name in STATIC_ASSETS:
+        digest = hashlib.sha256((STATIC_INDEX.parent / name).read_bytes()).hexdigest()[:16]
+        html = html.replace(f'/static/{name}"', f'/static/{name}?v={digest}"')
+    return html
 
 
 class TaskInput(BaseModel):
@@ -329,8 +338,11 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
     register_activity_routes(router, settings, actor_dependency, session_dependency)
 
     @router.get("/miniapp")
-    async def miniapp_entry() -> FileResponse:
-        return FileResponse(STATIC_INDEX, media_type="text/html")
+    async def miniapp_entry() -> HTMLResponse:
+        return HTMLResponse(
+            miniapp_html(),
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     @router.get("/api/miniapp/bootstrap")
     async def bootstrap(
