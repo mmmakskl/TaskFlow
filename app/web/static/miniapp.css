@@ -30,6 +30,13 @@
 .top-actions{display:flex;align-items:center;gap:8px}.theme-toggle{width:36px;height:36px;border-radius:13px;background:#fff;border:1px solid var(--line);color:#42516a;font-size:17px;display:grid;place-items:center}
 
 /* Consistent inline SVG icon system and responsive analytics dashboard. */
+.task-search{display:flex;align-items:center;gap:9px;background:var(--card);border:1px solid var(--line);border-radius:15px;padding:0 12px;margin:15px 0;box-shadow:var(--shadow);color:var(--muted)}
+.task-search:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px #3988f722}
+.task-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--ink);padding:13px 0;font-size:13px}
+.task-search input::placeholder{color:var(--muted)}
+.task-search-clear{background:transparent;color:var(--muted);font-size:22px;line-height:1;padding:5px}
+.task-search-clear[hidden]{display:none}
+.search-count{font-size:11px;font-weight:700;color:var(--muted);margin:10px 3px}
 .tf-icon{display:inline-block;vertical-align:-.2em;flex:0 0 auto}
 .logo svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .avatar svg{width:16px;height:16px;fill:none;stroke:#63748c;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}

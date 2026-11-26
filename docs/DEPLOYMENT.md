@@ -16,9 +16,9 @@ bot at a development tunnel. Both users must initiate the chat. Use Python 3.12+
 ## Current target
 
 - Private source: `https://github.com/mmmakskl/TaskFlow`, branch `main`.
-- Render Docker **Web Service**: `taskflow-private`, Frankfurt, approved Free plan.
-- Service ID: `srv-db2mk82d0e5s73bm4sog`.
-- Origin: `https://taskflow-private.onrender.com`.
+- Render Docker **Web Service**: `taskflow-duo`, Frankfurt, approved Free plan.
+- Service ID: `srv-dc1kmgafngtc73ftt3tg`.
+- Origin: `https://taskflow-duo.onrender.com`.
 - Database: external persistent Supabase PostgreSQL; application schema `taskflow`.
 - Telegram: `https://t.me/taskflow_duo_bot`, secret-verified webhook; no polling.
 

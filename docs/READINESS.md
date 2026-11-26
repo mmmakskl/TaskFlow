@@ -1,5 +1,22 @@
 # Production readiness evidence
 
+## Active production service — 2026-11-24
+
+The active Render service is `taskflow-duo` (`srv-dc1kmgafngtc73ftt3tg`) at
+`https://taskflow-duo.onrender.com`, linked to `mmmakskl/TaskFlow` `main`. The older
+`taskflow-private.onrender.com` endpoint returns Render's `suspend-by-user` 503 and is not the
+current production target.
+
+PR [#11](https://github.com/mmmakskl/TaskFlow/pull/11) merged Mini App task search as `fc5bd8b`.
+Its CI passed tests, dependency audit and production Docker build. Render auto-deploy
+`dep-dc2r9ge7bikc73852f2g` succeeded for that commit. Live `/health` and `/ready` returned 200;
+`/miniapp`, `miniapp.css` and `miniapp.js` returned 200 and matched the release files by SHA-256.
+Unauthenticated search returned 401 as expected. Authenticated Telegram search and webhook delivery
+were not independently exercised on this release.
+
+The production HTTP smoke workflow now targets `taskflow-duo` through `PRODUCTION_BASE_URL` and
+its default URL. The service's next deployment should be verified against this origin.
+
 ## Mini App analytics / volume template release — 2026-11-10
 
 PR [#9](https://github.com/mmmakskl/TaskFlow/pull/9) merged to `main` as

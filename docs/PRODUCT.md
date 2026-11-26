@@ -24,6 +24,9 @@ Leave and discard / Stay, preserving inputs on Stay. Context actions remain inli
 screen. Shared tasks also have a separate dashboard entry.
 
 Task tabs are Mine, Peer, Shared and Assigned by me. Mine/Peer include shared work, marked explicitly.
+The Mini App task search matches title fragments without case sensitivity across both participants,
+all task statuses and subtasks. Results are ranked by title prefix, word prefix and other matches;
+selecting one opens its task card. Clearing the search restores the selected task scope and filter.
 Filters include All (default), Active, In progress, Pending agreement, Done and Archive. Lists have
 five items per page and preserve tab/filter/page when returning from a card. The user-level summary
 covers the entire list regardless of filter/page: TODO points, IN_PROGRESS points, combined plan,
