@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramNetworkError, Tel
 from aiogram.methods import SendMessage
 from sqlalchemy import func, select, text, update
 
+from app.bot.callbacks.actions import Action
 from app.db.session import database
 from app.models import AuditEvent, Notification, Penalty, PenaltyType, ScoreEvent, User
 from app.notifications.delivery import send_notification
@@ -67,7 +68,9 @@ async def test_ten_quick_tasks_one_notification_with_live_count(factory, setting
     message = sends(api)[0]
     assert message.chat_id == settings.user_vika_id
     assert "Сейчас ждут твоей оценки: 10" in message.text
-    assert message.reply_markup is None
+    control = message.reply_markup.inline_keyboard[0][0]
+    assert control.web_app is None and control.url is None
+    assert Action.unpack(control.callback_data).name == "ratings"
     async with factory() as session:
         row = await session.scalar(select(Notification))
         assert row.status == "sent" and row.attempts == 1
@@ -205,7 +208,10 @@ async def test_rating_owner_notification_once_and_no_status_notifications(
         await send_notification(factory, telegram[0], settings)
     messages = sends(telegram[1])
     assert len(messages) == 1 and "750 баллов" in messages[0].text
-    assert messages[0].reply_markup is None
+    control = messages[0].reply_markup.inline_keyboard[0][0]
+    assert control.web_app is None and control.url is None
+    action = Action.unpack(control.callback_data)
+    assert action.name == "task" and action.entity == task_id
 
 
 async def test_penalty_recipient_snapshot_notification_once(factory, settings, telegram):

@@ -1,6 +1,7 @@
 """Permanent private-chat navigation and durable form interruption."""
 
 import logging
+from collections.abc import Collection
 from secrets import randbelow
 from typing import Any
 
@@ -8,13 +9,14 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
+    BotCommand,
     BotCommandScopeChat,
+    BotCommandScopeDefault,
     CallbackQuery,
-    InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonCommands,
     Message,
     ReplyKeyboardRemove,
-    WebAppInfo,
 )
 from pydantic import ValidationError
 
@@ -23,7 +25,6 @@ from app.bot.callbacks.actions import Action
 from app.bot.keyboards.common import button, keyboard
 from app.bot.middlewares.interaction import FORM_ACTIONS, NAVIGATION, NEW_FORMS, draft_valid
 from app.bot.render import discard_input, render, reset
-from app.config.settings import Settings
 from app.models import User
 from app.services.rules import DomainError
 from app.services.ui import UIService
@@ -63,13 +64,22 @@ def fresh_nonce(previous: int | None = None) -> int:
     return nonce if nonce != previous else nonce % 2147483647 + 1
 
 
-async def register_commands(bot: Bot, chat_ids: tuple[int, ...] | list[int] | set[int]) -> None:
-    for chat_id in chat_ids:
+async def register_commands(bot: Bot, chat_ids: Collection[int]) -> None:
+    commands = [BotCommand(command=name, description=label) for name, label in COMMANDS.items()]
+    scopes: list[BotCommandScopeDefault | BotCommandScopeChat] = [
+        BotCommandScopeDefault(),
+        *(BotCommandScopeChat(chat_id=i) for i in chat_ids),
+    ]
+    for scope in scopes:
         try:
-            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=chat_id))
+            await bot.set_my_commands(commands, scope=scope)
         except (TelegramAPIError, TelegramNetworkError):
-            # Registration is a convenience; do not log Telegram errors containing tokens.
             logging.getLogger(__name__).warning("command_registration_failed")
+    for chat_id in (None, *chat_ids):
+        try:
+            await bot.set_chat_menu_button(chat_id=chat_id, menu_button=MenuButtonCommands())
+        except (TelegramAPIError, TelegramNetworkError):
+            logging.getLogger(__name__).warning("chat_menu_configuration_failed")
 
 
 async def message_destination(message: Message, bot: Bot) -> str | None:
@@ -87,28 +97,10 @@ async def message_destination(message: Message, bot: Bot) -> str | None:
     return command if command in COMMANDS else None
 
 
-async def launch_miniapp(bot: Bot, actor: User, settings: Settings) -> None:
-    """Clear a previously installed reply keyboard and show a one-time app launch CTA."""
+async def remove_reply_keyboard(bot: Bot, actor: User) -> None:
+    """Remove legacy persistent controls before presenting the inline chat menu."""
     await bot.send_message(
-        actor.telegram_id,
-        "TaskFlow теперь открывается в приложении. Старые кнопки удалены.",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    if not settings.webhook_base_url:
-        await bot.send_message(
-            actor.telegram_id,
-            "Для локального запуска задай WEBHOOK_BASE_URL с HTTPS адресом Mini App.",
-        )
-        return
-    url = f"{settings.webhook_base_url.rstrip('/')}/miniapp"
-    await bot.send_message(
-        actor.telegram_id,
-        "Задачи, согласования и звёзды — в одном месте.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Открыть TaskFlow", web_app=WebAppInfo(url=url))]
-            ]
-        ),
+        actor.telegram_id, "Открываю TaskFlow.", reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -271,16 +263,8 @@ async def handle_navigation(event: Message | CallbackQuery, data: dict[str, Any]
     saved = await state.get_data()
     pending = saved.get("nav_pending")
     command = await message_destination(event, bot) if isinstance(event, Message) else None
-    if command == "start":
-        await reset(state, keep_navigation=False)
-        await bot.send_message(
-            actor.telegram_id, "Открываю TaskFlow.", reply_markup=ReplyKeyboardRemove()
-        )
-        await destination_screen(DESTINATIONS["menu"], bot, actor, state, ui)
-        if isinstance(event, Message):
-            await discard_input(event)
-        return True
-    if command in {"menu", "cancel"}:
+    if command in {"start", "menu", "cancel"}:
+        await remove_reply_keyboard(bot, actor)
         await destination_screen(DESTINATIONS[command], bot, actor, state, ui)
         if isinstance(event, Message):
             await discard_input(event)

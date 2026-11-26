@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.dispatcher import create_dispatcher
+from app.bot.storage import cleanup_legacy_keyboards
 from app.config.logging import configure_logging
 from app.config.settings import Settings
 from app.db.seed import seed
@@ -58,6 +59,8 @@ def create_app(
                 await configure_webhook(telegram, settings)
             if settings.register_webhook and settings.webhook_base_url:
                 await configure_miniapp_menu(telegram, settings)
+                async with factory.begin() as session:
+                    await cleanup_legacy_keyboards(session, telegram, settings)
             task = (
                 asyncio.create_task(run_workers(factory, dp, telegram, settings, stop))
                 if workers

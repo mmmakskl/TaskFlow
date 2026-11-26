@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     environment: str = "production"
     log_level: str = "INFO"
     register_webhook: bool = True
+    telegram_html_widget_enabled: bool = False
 
     @field_validator("default_timezone")
     @classmethod
@@ -32,6 +33,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
+        if self.telegram_html_widget_enabled:
+            raise ValueError(
+                "TELEGRAM_HTML_WIDGET_ENABLED=true is unavailable: the chat HTML widget is not implemented"
+            )
         if self.user_max_id <= 0 or self.user_vika_id <= 0:
             raise ValueError("Telegram IDs must be positive")
         if self.user_max_id == self.user_vika_id:

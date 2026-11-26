@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import DeleteMyCommands
+from aiogram.methods import SetChatMenuButton, SetMyCommands
 from aiogram.types import Chat, Message
 
 from app.bot.callbacks.actions import Action
@@ -112,14 +112,18 @@ async def test_scoped_registration_continues_after_failure():
     original = api.make_request
 
     async def request(bot, method, timeout=None):  # noqa: ASYNC109 - transport signature
-        if isinstance(method, DeleteMyCommands) and method.scope.chat_id == 1001:
+        if isinstance(method, SetMyCommands) and getattr(method.scope, "chat_id", None) == 1001:
             raise TelegramNetworkError(method=method, message="offline")
         return await original(bot, method, timeout)
 
     api.make_request = request
     await register_commands(bot, [1001, 1002])
-    call = api.calls[-1]
-    assert isinstance(call, DeleteMyCommands) and call.scope.chat_id == 1002
+    registrations = [call for call in api.calls if isinstance(call, SetMyCommands)]
+    assert {getattr(call.scope, "chat_id", None) for call in registrations} == {None, 1002}
+    assert all([c.command for c in call.commands] == list(COMMANDS) for call in registrations)
+    menus = [call for call in api.calls if isinstance(call, SetChatMenuButton)]
+    assert {call.chat_id for call in menus} == {None, 1001, 1002}
+    assert all(call.menu_button.type == "commands" for call in menus)
     await bot.session.close()
 
 

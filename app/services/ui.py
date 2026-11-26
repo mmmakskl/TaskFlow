@@ -1,6 +1,6 @@
 from zoneinfo import ZoneInfo
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.keyboards.common import button, keyboard, pager
 from app.bot.render import progress, safe, short
@@ -83,22 +83,6 @@ class UIService:
                 button("Настройки", "settings"),
             ],
         )
-        if self.tasks.settings.webhook_base_url.startswith("https://"):
-            url = self.tasks.settings.webhook_base_url.rstrip("/") + "/miniapp"
-            markup.inline_keyboard[-1] = [
-                InlineKeyboardButton(
-                    text="Новая задача", web_app=WebAppInfo(url=url + "?screen=new")
-                ),
-                InlineKeyboardButton(
-                    text="Штрафы", web_app=WebAppInfo(url=url + "?screen=penalties")
-                ),
-                InlineKeyboardButton(
-                    text="Настройки", web_app=WebAppInfo(url=url + "?screen=settings")
-                ),
-            ]
-            markup.inline_keyboard.append(
-                [InlineKeyboardButton(text="Открыть TaskFlow", web_app=WebAppInfo(url=url))]
-            )
         return text, markup
 
     async def task_created(self, actor: User, task: Task) -> tuple[str, InlineKeyboardMarkup]:
@@ -389,14 +373,6 @@ class UIService:
             [button("⬅️ Назад", "list", back_page, value=back_filter), button("🏠 Меню", "menu")]
         )
         markup = keyboard(*rows)
-        if self.tasks.settings.webhook_base_url.startswith("https://"):
-            url = (
-                self.tasks.settings.webhook_base_url.rstrip("/")
-                + f"/miniapp?screen=tasks&task={task.id}"
-            )
-            markup.inline_keyboard.insert(
-                -1, [InlineKeyboardButton(text="Открыть в приложении", web_app=WebAppInfo(url=url))]
-            )
         return text, markup
 
     @staticmethod

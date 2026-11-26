@@ -130,7 +130,8 @@ async def test_render_uses_markup_only_when_text_matches_and_ignores_no_change(s
     await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
     await render(bot, 1001, state, "Text", keyboard([button("B", "menu")]))
     assert isinstance(api.calls[-1], EditMessageReplyMarkup)
-    assert len([call for call in api.calls if isinstance(call, SendRichMessage)]) == 1
+    assert len([call for call in api.calls if isinstance(call, SendMessage)]) == 1
+    assert not any(isinstance(call, SendRichMessage) for call in api.calls)
     original = api.make_request
 
     async def no_change(bot, method, timeout=None):  # noqa: ASYNC109 - Bot API signature
@@ -145,24 +146,23 @@ async def test_render_uses_markup_only_when_text_matches_and_ignores_no_change(s
     await bot.session.close()
 
 
-async def test_rich_fallback_only_on_explicit_rejection(state):
+@pytest.mark.parametrize("legacy_cache", [False, True])
+async def test_render_sends_ordinary_html_without_trying_rich_api(state, legacy_cache):
     api = TelegramSession()
-    original = api.make_request
-
-    async def unsupported(bot, method, timeout=None):  # noqa: ASYNC109
-        if isinstance(method, SendRichMessage):
-            raise TelegramBadRequest(method=method, message="method not found")
-        return await original(bot, method, timeout)
-
-    api.make_request = unsupported
     bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
+    await state.update_data(rich_unsupported=legacy_cache)
     await render(bot, 1001, state, "A\n<b>B</b>", keyboard([button("A", "menu")]))
-    assert isinstance(api.calls[-1], SendMessage)
-    assert (await state.get_data())["rich_unsupported"] is True
+    assert len(api.calls) == 1 and isinstance(api.calls[0], SendMessage)
+    assert api.calls[0].parse_mode == "HTML"
+    assert api.calls[0].text == "A\n<b>B</b>"
+    await render(bot, 1001, state, "Changed", keyboard([button("A", "menu")]))
+    assert isinstance(api.calls[-1], EditMessageText)
+    assert api.calls[-1].parse_mode == "HTML"
+    assert api.calls[-1].rich_message is None
     await bot.session.close()
 
 
-async def test_rich_network_error_never_retries_send(state):
+async def test_html_network_error_never_retries_send(state):
     api = TelegramSession()
     calls = []
 
@@ -174,7 +174,7 @@ async def test_rich_network_error_never_retries_send(state):
     bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
     with pytest.raises(TelegramNetworkError):
         await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
-    assert len(calls) == 1 and isinstance(calls[0], SendRichMessage)
+    assert len(calls) == 1 and isinstance(calls[0], SendMessage)
     await bot.session.close()
 
 
@@ -283,6 +283,29 @@ def test_new_partial_target_and_template_form_validation():
         ("RatingForm:points", {"task_id": True, "task_version": 1}),
         ("TemplateForm:field", {"field": ["title"]}),
         ("TemplateForm:field", {"field": "unknown"}),
+        (
+            "TemplateForm:field",
+            {"field": "base_quantity", "title": "T", "points": 500, "pricing_mode": []},
+        ),
+        (
+            "TemplateForm:field",
+            {"field": "base_quantity", "title": "T", "points": 500, "pricing_mode": "FIXED"},
+        ),
+        (
+            "TemplateForm:field",
+            {"field": "unit_label", "title": "T", "points": 500, "pricing_mode": "PER_TIME"},
+        ),
+        (
+            "TemplateForm:field",
+            {
+                "field": "unit_label",
+                "title": "T",
+                "points": 500,
+                "pricing_mode": "PER_QUANTITY",
+                "pricing_edit": True,
+                "base_quantity": True,
+            },
+        ),
         ("TemplateForm:field", {"field": "points", "title": 3}),
         ("TemplateForm:field", {"field": "title", "template_edit_id": 1}),
         ("TemplateForm:field", {"field": "estimated_minutes", "title": "Template", "points": True}),
@@ -356,38 +379,52 @@ def test_volume_template_draft_requires_valid_calculated_quantity():
     assert not draft_valid("TaskForm:draft", {"flow": 1, "key": "draft-key", **invalid})
 
 
-async def test_rich_fallback_on_unknown_method_404(state):
-    from aiogram.exceptions import TelegramNotFound
-
-    api = TelegramSession()
-    original = api.make_request
-
-    async def unsupported(bot, method, timeout=None):  # noqa: ASYNC109
-        if isinstance(method, SendRichMessage):
-            raise TelegramNotFound(method=method, message="Not Found")
-        return await original(bot, method, timeout)
-
-    api.make_request = unsupported
-    bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
-    await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
-    assert isinstance(api.calls[-1], SendMessage)
-    await bot.session.close()
-
-
-def test_notification_deep_link_targets_the_task_and_inbox():
+@pytest.mark.parametrize(
+    "kind,payload,name,entity",
+    [
+        ("rated", {"task_id": 42}, "task", 42),
+        ("task_rejected", {"task_id": 7}, "task", 7),
+        ("rating_pending", {}, "ratings", 0),
+        ("penalty_created", {}, "penalty_list", 0),
+        ("handler_error", {}, "menu", 0),
+        ("rated", {"task_id": True}, "menu", 0),
+    ],
+)
+@pytest.mark.parametrize("base_url", ["", "https://example.com"])
+def test_notifications_always_navigate_inside_chat(kind, payload, name, entity, base_url):
     from types import SimpleNamespace
 
+    from app.bot.callbacks.actions import Action
     from app.notifications.messages import notification_link
 
-    rated = SimpleNamespace(kind="rated", payload={"task_id": 42})
-    pending = SimpleNamespace(kind="rating_pending", payload={})
-    assert (
-        notification_link(rated, "https://example.com")
-        .inline_keyboard[0][0]
-        .web_app.url.endswith("/miniapp?screen=tasks&task=42")
+    markup = notification_link(SimpleNamespace(kind=kind, payload=payload), base_url)
+    control = markup.inline_keyboard[0][0]
+    assert control.web_app is None and control.url is None
+    action = Action.unpack(control.callback_data)
+    assert (action.name, action.entity) == (name, entity)
+
+
+async def test_validation_error_does_not_replay_cached_webapp_controls(state):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+    from app.bot.render import validation_error
+
+    api = TelegramSession()
+    bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Legacy app", web_app=WebAppInfo(url="https://example.com/miniapp")
+                ),
+                InlineKeyboardButton(text="Menu", callback_data="menu"),
+            ]
+        ]
     )
-    assert (
-        notification_link(pending, "https://example.com")
-        .inline_keyboard[0][0]
-        .web_app.url.endswith("/miniapp?screen=inbox")
+    await state.update_data(
+        message_id=10, screen_text="Prompt", screen_markup=markup.model_dump(mode="json")
     )
+    await validation_error(bot, 1001, state, "Try again")
+    assert api.calls[-1].reply_markup.inline_keyboard[0][0].text == "Menu"
+    assert len(api.calls[-1].reply_markup.inline_keyboard[0]) == 1
+    await bot.session.close()

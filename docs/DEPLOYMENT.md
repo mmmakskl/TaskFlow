@@ -167,8 +167,18 @@ update with a reserved negative ID: it does not impersonate a user or send a cha
 receipt's marker must still exist after redeploy. Receipts contain counts/hashes, never task text or
 secrets. Avoid changing business records between receipts when comparing their exact fingerprints.
 
-Also send a real `/start` from an authorized Telegram account and verify the Mini App launcher and
-menu button. Open `/miniapp` in Telegram and confirm dashboard loading and task mutation, then inspect
+Keep `TELEGRAM_HTML_WIDGET_ENABLED=false`; `true` intentionally fails startup validation until
+a compatible in-chat widget is implemented in a separate release. New chat output uses ordinary
+HTML messages and inline callbacks, with no Mini App launcher or automatic Rich Message calls.
+Startup installs global and per-user command menus and attempts to clear known persisted WebApp
+keyboards. Historical launch/notification messages without stored IDs cannot be discovered or
+cleaned; no chat history is scanned. Telegram may also reject edits to old messages.
+
+Also send a real `/start` and `/menu` from each authorized Telegram account and verify the chat
+menu, command button, forms, notifications, five-item pagination and stale-button rejection.
+Confirm the old persistent reply keyboard is removed. Test both users, shared completion/reopening,
+ratings, penalties, settings and fixed/time/quantity templates. The standalone `/miniapp` remains
+available for separate acceptance. Then inspect
 inbox/logs/getWebhookInfo for successful delivery. An old `last_error_date` can remain after recovery;
 check pending count and whether newer updates were delivered. Synthetic HTTP checks alone do not
 prove Telegram-to-Render delivery. Recheck health/ready and existing tasks after a second deployment.

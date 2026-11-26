@@ -1,5 +1,18 @@
 # Production readiness evidence
 
+## Chat-only navigation and future widget — pending release
+
+The `feat/chat-widget-flag` change is a development release candidate, with no production deployment
+or two-account Telegram-client acceptance claimed. Keep `TELEGRAM_HTML_WIDGET_ENABLED=false`.
+The flag rejects `true` at configuration validation; this release includes only the future widget
+specification and static mockups. Chat messages use ordinary HTML and inline actions.
+
+Before rollout, use the chat acceptance steps in [DEPLOYMENT](DEPLOYMENT.md). Existing WebApp menu
+buttons are reset globally and for both configured users. Only saved message IDs can be cleaned;
+older untracked launch and notification messages may retain their buttons, and Telegram can reject
+edits. This limitation does not authorize scanning chat history. Older rollout records below remain
+historical evidence and do not prove delivery or persistence for this change.
+
 ## Active production service — 2026-11-24
 
 The active Render service is `taskflow-duo` (`srv-dc1kmgafngtc73ftt3tg`) at

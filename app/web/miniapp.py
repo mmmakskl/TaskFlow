@@ -14,7 +14,6 @@ from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.types import MenuButtonWebApp, WebAppInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -1012,20 +1011,7 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
 
 
 async def configure_miniapp_menu(bot: Bot, settings: Settings) -> None:
-    """Expose only the app launcher in Telegram's chat menu for the two authorized accounts."""
-    url = f"{settings.webhook_base_url.rstrip('/')}/miniapp"
-    from aiogram.types import BotCommandScopeChat
+    """Compatibility entry point: reset legacy app menus to authenticated chat commands."""
+    from app.bot.navigation import register_commands
 
-    try:
-        await bot.delete_my_commands()
-    except Exception:
-        logger.warning("miniapp_default_commands_clear_failed")
-    for chat_id in settings.authorized_ids:
-        try:
-            await bot.set_chat_menu_button(
-                chat_id=chat_id,
-                menu_button=MenuButtonWebApp(text="TaskFlow", web_app=WebAppInfo(url=url)),
-            )
-            await bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=chat_id))
-        except Exception:
-            logger.warning("miniapp_menu_configuration_failed")
+    await register_commands(bot, settings.authorized_ids)

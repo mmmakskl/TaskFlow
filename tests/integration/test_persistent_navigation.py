@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from aiogram.methods import SendMessage, SendRichMessage, SetMyCommands
+from aiogram.methods import SendMessage, SetMyCommands
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
@@ -296,29 +296,27 @@ async def test_notification_navigation_during_draft_retains_current_screen_until
     await driver.bot.session.close()
 
 
-async def test_start_opens_miniapp_without_command_suggestions(factory, settings):
+@pytest.mark.parametrize("command", ["/start", "/menu"])
+async def test_start_and_menu_open_chat_without_launchers(factory, settings, command):
     settings = settings.model_copy(update={"webhook_base_url": "https://taskflow.example"})
     driver = BotDriver(factory, settings)
     app = create_app(settings, bot=driver.bot, session_factory=factory, workers=False)
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/ready")).status_code == 200
-        await driver.text(1001, "/start")
-        launcher = next(
-            c.reply_markup
-            for c in reversed(driver.api.calls)
-            if isinstance(c, SendRichMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
-        )
-        assert any(
-            button.web_app and button.web_app.url == "https://taskflow.example/miniapp"
-            for row in launcher.inline_keyboard
+        await driver.text(1001, command)
+        screen = driver.screen(1001)
+        assert "Неделя" in screen.text
+        assert all(
+            button.callback_data and not button.web_app and not button.url
+            for row in screen.reply_markup.inline_keyboard
             for button in row
         )
         assert any(
             isinstance(getattr(c, "reply_markup", None), ReplyKeyboardRemove)
             for c in driver.api.calls
         )
-    assert not any(isinstance(c, SetMyCommands) for c in driver.api.calls)
+    await driver.bot.session.close()
 
 
 @pytest.mark.parametrize(
@@ -449,7 +447,7 @@ async def test_menu_reopens_at_bottom_then_other_commands_edit_latest_screen(fac
     inline = [
         c
         for c in driver.api.calls
-        if isinstance(c, SendRichMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
+        if isinstance(c, SendMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
     ]
     assert not carriers and len(inline) == 4
     await driver.bot.session.close()

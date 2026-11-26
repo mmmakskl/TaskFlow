@@ -74,13 +74,14 @@ FORM_ACTIONS = {
         "type_clear",
     },
     "RatingForm": set(),
-    "TemplateForm": {"tpl_none", "tpl_back"},
+    "TemplateForm": {"tpl_none", "tpl_back", "tpl_mode"},
     "ConfirmationForm": {
         "status_confirm",
         "penalty_delete_confirm",
         "type_toggle_confirm",
         "rerate_confirm",
         "tpl_disable_confirm",
+        "tpl_delete_confirm",
         "reject_confirm",
     },
 }
@@ -201,14 +202,30 @@ def new_fields_valid(current: str, data: dict[str, Any]) -> bool:
             ):
                 return False
         else:
-            if data.get("field") in ("points", "estimated_minutes") and not valid_text(
-                data.get("title"), 200
-            ):
+            if data.get("field") in (
+                "points",
+                "estimated_minutes",
+                "pricing_mode",
+                "base_quantity",
+                "unit_label",
+            ) and not valid_text(data.get("title"), 200):
                 return False
-            if data.get("field") == "estimated_minutes" and not valid_number(
-                data.get("points"), 10000
-            ):
+            if data.get("field") in (
+                "estimated_minutes",
+                "pricing_mode",
+                "base_quantity",
+                "unit_label",
+            ) and not valid_number(data.get("points"), 10000):
                 return False
+    if current == TemplateForm.field.state and data.get("field") in ("base_quantity", "unit_label"):
+        mode = data.get("pricing_mode")
+        if mode not in ("PER_TIME", "PER_QUANTITY"):
+            return False
+        if data.get("field") == "unit_label" and (
+            mode != "PER_QUANTITY"
+            or (data.get("pricing_edit") and not valid_number(data.get("base_quantity"), 10000))
+        ):
+            return False
     if current == ConfirmationForm.action.state:
         confirmation = data.get("confirmation")
         if isinstance(confirmation, dict) and confirmation.get("name") == "rerate_confirm":
@@ -244,7 +261,14 @@ def draft_valid(current: str | None, data: dict[str, Any]) -> bool:
         return False
     if current == TemplateForm.field.state:
         field = data.get("field")
-        if field not in ("title", "points", "estimated_minutes"):
+        if field not in (
+            "title",
+            "points",
+            "estimated_minutes",
+            "pricing_mode",
+            "base_quantity",
+            "unit_label",
+        ):
             return False
         if data.get("template_edit_id"):
             needed |= {"template_edit_id", "template_edit_version"}

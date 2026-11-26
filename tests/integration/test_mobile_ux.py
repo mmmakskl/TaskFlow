@@ -7,9 +7,8 @@ from aiogram.methods import (
     AnswerCallbackQuery,
     EditMessageText,
     SendMessage,
-    SendRichMessage,
 )
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.bot.callbacks.actions import callback
@@ -81,8 +80,8 @@ async def test_fast_create_comment_input_and_dashboard_single_message(factory, s
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, SendRichMessage)
-                and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+                if isinstance(call, SendMessage)
+                and isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
         )
         == 1
@@ -196,7 +195,7 @@ async def test_unexpected_text_commands_and_media_keep_draft_and_buttons(factory
     await driver.press(1001, "✅ Создать")
     await driver.text(1001, "Idle text")
     await driver.text(1001, "Another idle text")
-    assert "Открой TaskFlow" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     async with factory() as session:
         task = await session.scalar(select(Task))
         assert task.title == "Saved title"
@@ -205,11 +204,11 @@ async def test_unexpected_text_commands_and_media_keep_draft_and_buttons(factory
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, (SendMessage, SendRichMessage))
-                and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+                if isinstance(call, SendMessage)
+                and isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
         )
-        == 3
+        == 1
     )
 
 
@@ -314,8 +313,8 @@ async def test_menu_reopens_at_chat_bottom(factory, settings):
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, SendRichMessage)
-                and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+                if isinstance(call, SendMessage)
+                and isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
         )
         == 3
@@ -511,7 +510,7 @@ async def test_optional_message_cleanup_network_failure_does_not_undo_action(fac
         )
 
 
-async def test_notification_has_no_action_buttons_and_preserves_dialog(factory, settings):
+async def test_notification_opens_task_inside_chat_and_preserves_dialog(factory, settings):
     from app.notifications.worker import send_notification
 
     await seed_tasks(factory, settings, 1)
@@ -533,11 +532,12 @@ async def test_notification_has_no_action_buttons_and_preserves_dialog(factory, 
         await send_notification(factory, driver.bot, settings)
     else:
         pytest.fail("Rating-completed notification was not delivered")
-    assert notifications[-1].reply_markup is None
+    control = notifications[-1].reply_markup.inline_keyboard[0][0]
+    assert control.web_app is None and control.url is None
+    assert control.callback_data.startswith("a:task:")
     async with factory() as session:
         dialog = await session.scalar(select(Dialog))
         assert dialog.data["message_id"] == original
-    await driver.text(1001, "/tasks")
-    await driver.press(1001, "Задача 00")
+    await driver.press(1001, "Открыть задачу")
     await driver.press(1001, "Начать")
     assert "В работе" in driver.screen(1001).text

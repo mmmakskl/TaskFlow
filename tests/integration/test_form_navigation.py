@@ -1,6 +1,6 @@
 import pytest
-from aiogram.methods import SendRichMessage
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.methods import SendMessage
+from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 
 from app.models import AuditEvent, Penalty, PenaltyType, ScoreEvent, Task, User
@@ -83,8 +83,7 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
     sends = [
         call
         for call in driver.api.calls
-        if isinstance(call, SendRichMessage)
-        and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+        if isinstance(call, SendMessage) and isinstance(call.reply_markup, InlineKeyboardMarkup)
     ]
     assert len(sends) == 2
     await driver.bot.session.close()
