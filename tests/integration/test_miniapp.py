@@ -147,6 +147,10 @@ async def test_miniapp_auth_and_task_workflow(factory, settings) -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         page = await client.get("/miniapp")
         assert page.status_code == 200 and "telegram-web-app.js" in page.text
+        assert page.headers["cache-control"] == "no-store, max-age=0"
+        for asset in ("miniapp.css", "activity.js", "miniapp.js"):
+            assert f"/static/{asset}?v=" in page.text
+            assert f'/static/{asset}"' not in page.text
         assert (await client.get("/api/miniapp/bootstrap")).status_code == 401
         unauthorized = {"Authorization": f"tma {init_data(settings, 9999)}"}
         assert (await client.get("/api/miniapp/bootstrap", headers=unauthorized)).status_code == 403
