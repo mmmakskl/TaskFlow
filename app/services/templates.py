@@ -1,5 +1,12 @@
+from __future__ import annotations
+
+import builtins
+
+from sqlalchemy import select
+
 from app.config.settings import Settings
 from app.models import TaskTemplate, User
+from app.models.entities import Tag, TemplateTag
 from app.repositories.templates import TaskTemplateRepository
 from app.services.base import AuthorizedService
 from app.services.rules import (
@@ -56,6 +63,7 @@ class TaskTemplateService(AuthorizedService):
         pricing_mode: str = "FIXED",
         base_quantity: int | None = None,
         unit_label: str | None = None,
+        tag_ids: builtins.list[int] | None = None,
     ) -> TaskTemplate:
         actor = await self.actor(actor)
         await self.configured_participant_ids()
@@ -78,8 +86,24 @@ class TaskTemplateService(AuthorizedService):
             unit_label=label,
             operation_key=key,
         )
+        if tag_ids is not None:
+            if len(tag_ids) > 50 or len(set(tag_ids)) != len(tag_ids):
+                raise DomainError("Недопустимый список тегов.")
+            tags = list(
+                await self.repo.session.scalars(
+                    select(Tag)
+                    .where(Tag.id.in_(tag_ids))
+                    .order_by(Tag.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            )
+            if len(tags) != len(tag_ids) or any(tag.archived for tag in tags):
+                raise DomainError("Тег недоступен или архивирован.")
         self.repo.add(template)
         await self.repo.flush()
+        for tag_id in tag_ids or []:
+            self.repo.add(TemplateTag(template_id=template.id, tag_id=tag_id))
         self.repo.audit(actor, template, "create", {}, self.snapshot(template))
         return template
 

@@ -3,9 +3,14 @@ from html import escape
 from typing import Any
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramNetworkError
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramNetworkError,
+    TelegramNotFound,
+)
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardMarkup, InputRichMessage, Message
 
 from app.services.rules import DomainError
 
@@ -21,9 +26,31 @@ def short(value: str, maximum: int) -> str:
 
 
 def progress(score: int, target: int) -> str:
-    percent = max(0, min(100, int(score * 100 / target)))
-    filled = percent // 10
+    percent = max(0, int(score * 100 / target)) if target > 0 else 0
+    filled = min(100, percent) // 10
     return f"{'█' * filled}{'░' * (10 - filled)} {percent}%"
+
+
+def rich_content(text: str) -> InputRichMessage:
+    """Existing screens use escaped HTML with newlines; preserve those line breaks."""
+    return InputRichMessage(html="<p>" + text.replace("\n", "<br>") + "</p>")
+
+
+def rich_unsupported(exc: TelegramBadRequest | TelegramNotFound) -> bool:
+    """Only retry after an explicit rejection, never after an ambiguous transport failure."""
+    message = str(exc).lower()
+    if isinstance(exc, TelegramNotFound) and exc.message.strip().lower() == "not found":
+        return True
+    return any(
+        fragment in message
+        for fragment in (
+            "method not found",
+            "method is not available",
+            "rich messages are not supported",
+            "rich message is not supported",
+            "rich_message is not supported",
+        )
+    )
 
 
 async def render(
@@ -31,6 +58,7 @@ async def render(
 ) -> None:
     data = await state.get_data()
     message_id = data.get("message_id")
+    use_rich = not data.get("rich_unsupported", False)
     if message_id:
         try:
             if data.get("rendered_text") == text:
@@ -38,13 +66,33 @@ async def render(
                     chat_id=chat_id, message_id=int(message_id), reply_markup=markup
                 )
             else:
-                await bot.edit_message_text(
-                    text=text,
-                    chat_id=chat_id,
-                    message_id=int(message_id),
-                    reply_markup=markup,
-                    parse_mode="HTML",
-                )
+                try:
+                    if use_rich:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=int(message_id),
+                            rich_message=rich_content(text),
+                            reply_markup=markup,
+                        )
+                    else:
+                        await bot.edit_message_text(
+                            text=text,
+                            chat_id=chat_id,
+                            message_id=int(message_id),
+                            reply_markup=markup,
+                            parse_mode="HTML",
+                        )
+                except (TelegramBadRequest, TelegramNotFound) as exc:
+                    if not use_rich or not rich_unsupported(exc):
+                        raise
+                    await state.update_data(rich_unsupported=True)
+                    await bot.edit_message_text(
+                        text=text,
+                        chat_id=chat_id,
+                        message_id=int(message_id),
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
             await state.update_data(
                 screen_text=text, rendered_text=text, screen_markup=markup.model_dump(mode="json")
             )
@@ -67,7 +115,16 @@ async def render(
                 )
             ):
                 raise
-    message = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    if use_rich:
+        try:
+            message = await bot.send_rich_message(chat_id, rich_content(text), reply_markup=markup)
+        except (TelegramBadRequest, TelegramNotFound) as exc:
+            if not rich_unsupported(exc):
+                raise
+            await state.update_data(rich_unsupported=True)
+            message = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    else:
+        message = await bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
     await state.update_data(
         message_id=message.message_id,
         screen_text=text,
@@ -84,7 +141,7 @@ NAVIGATION_KEYS = (
     "results_offset",
     "templates_page",
 )
-SCREEN_KEYS = ("message_id", "screen_text", "screen_markup", "rendered_text")
+SCREEN_KEYS = ("message_id", "screen_text", "screen_markup", "rendered_text", "rich_unsupported")
 
 
 async def reset(state: FSMContext, keep_navigation: bool = True, **data: Any) -> None:

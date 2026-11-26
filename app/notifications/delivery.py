@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config.settings import Settings
 from app.models import Notification
-from app.notifications.messages import notification_message
+from app.notifications.messages import notification_link, notification_message
 from app.repositories.notifications import NotificationRepository
 from app.services.notifications import NotificationService
 
@@ -29,6 +29,7 @@ async def send_notification(
     status, error_code, retry_after = "sent", None, None
     try:
         message, markup = notification_message(row, count)
+        markup = markup or notification_link(row, settings.webhook_base_url)
         if markup is None:
             await bot.send_message(user.telegram_id, message, parse_mode="HTML", request_timeout=20)
         else:

@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import AuditEvent, ScoreEvent, Task, TaskLink, TaskTemplate, User
+from app.models.entities import Tag, TaskTag, TemplateTag
 from app.repositories.base import Repository
 from app.services.rules import DomainError
 from app.utils.time import utcnow
@@ -36,6 +37,16 @@ FILTERS = {
 
 
 class TaskRepository(Repository):
+    async def task_tag_names(self, task_id: int) -> builtins.list[str]:
+        return list(
+            await self.session.scalars(
+                select(Tag.name)
+                .join(TaskTag, TaskTag.tag_id == Tag.id)
+                .where(TaskTag.task_id == task_id)
+                .order_by(Tag.name)
+            )
+        )
+
     async def list(
         self,
         actor: User,
@@ -43,6 +54,8 @@ class TaskRepository(Repository):
         page: int = 0,
         pending: bool = False,
         scope: str = "mine",
+        tag_id: int | None = None,
+        search: str | None = None,
     ) -> tuple[list[Task], int]:
         if type(page) is not int or not 0 <= page <= 100000 or filter_name not in FILTERS:
             raise DomainError("Недопустимая страница.")
@@ -56,6 +69,11 @@ class TaskRepository(Repository):
             Task.status.in_(statuses),
             self.visible(),
         )
+        if tag_id is not None:
+            conditions += (Task.id.in_(select(TaskTag.task_id).where(TaskTag.tag_id == tag_id)),)
+        if search:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions += (Task.title.ilike(f"%{escaped}%", escape="\\"),)
         if not pending:
             conditions += (Task.parent_task_id.is_(None),)
         if filter_name == "overdue" and not pending:
@@ -73,6 +91,24 @@ class TaskRepository(Repository):
             select(Task).where(*conditions).order_by(Task.id.desc()).offset(page * 5).limit(5)
         )
         return list(rows), count
+
+    async def template_tag_ids(self, template_id: int) -> builtins.list[int]:
+        return list(
+            await self.session.scalars(
+                select(TemplateTag.tag_id).where(TemplateTag.template_id == template_id)
+            )
+        )
+
+    async def tags_by_ids(self, ids: builtins.list[int]) -> builtins.list[Tag]:
+        return list(
+            await self.session.scalars(
+                select(Tag)
+                .where(Tag.id.in_(ids))
+                .order_by(Tag.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
 
     async def children(self, parent_id: int, *, lock: bool = False) -> builtins.list[Task]:
         query = (

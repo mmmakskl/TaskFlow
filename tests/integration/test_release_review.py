@@ -4,7 +4,13 @@ import httpx
 import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.methods import DeleteMyCommands, SendMessage, SetChatMenuButton, SetWebhook
+from aiogram.methods import (
+    DeleteMyCommands,
+    SendMessage,
+    SendRichMessage,
+    SetChatMenuButton,
+    SetWebhook,
+)
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy import func, select
 
@@ -33,7 +39,7 @@ async def test_denied_reply_failure_cannot_delay_next_authorized_update(factory,
     driver.api.make_request = send
     await driver.text(9000, "/start")
     await driver.text(1001, "/menu")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     async with factory() as session:
         rows = list(await session.scalars(select(Inbox).order_by(Inbox.update_id)))
         assert len(rows) == 2
@@ -87,7 +93,7 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             assert len(registrations) == 1
             assert registrations[0].url == "https://release.example.test/telegram/webhook"
             assert registrations[0].secret_token == production.webhook_secret.get_secret_value()
-            menus = [call for call in api.calls if isinstance(call, SendMessage)]
+            menus = [call for call in api.calls if isinstance(call, SendRichMessage)]
             dashboards = [
                 call for call in menus if isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
@@ -99,7 +105,7 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             )
             assert len([call for call in api.calls if isinstance(call, DeleteMyCommands)]) == 3
             assert len(menus) == 1 and len(dashboards) == 1
-            assert "НЕДЕЛЯ" in dashboards[0].text
+            assert "Неделя" in dashboards[0].rich_message.html
             assert all(call.chat_id == 1001 for call in menus)
 
 

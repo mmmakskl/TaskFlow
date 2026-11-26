@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 
 async def draft(driver, target="Себе", title="Offer"):
     await driver.text(1001, "/menu")
-    await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, target)
     await driver.text(1001, title)
 
@@ -45,7 +45,7 @@ async def test_explicit_draft_suggested_accept_shared_completion(
     assert "&lt;Offer&gt;" in driver.screen(1002).text
     await driver.press(1002, "Принять 725")
     await driver.text(owner, "/menu")
-    await driver.press(owner, "Все задачи")
+    await driver.press(owner, "Мои задачи")
     await driver.press(owner, "Offer")
     await driver.press(owner, "Выполнено")
     async with factory() as session:
@@ -72,7 +72,7 @@ async def test_peer_readonly_reject_nonce_and_manual_rerate(factory, settings):
         assert (await session.scalar(select(Task))).status == "BACKLOG"
     await driver.press(1002, "500")
     await driver.press(1002, "Меню")
-    await driver.press(1002, "Все задачи")
+    await driver.press(1002, "Мои задачи")
     await driver.press(1002, "Макс")
     await driver.press(1002, "Offer")
     assert not any(
@@ -94,7 +94,7 @@ async def test_peer_readonly_reject_nonce_and_manual_rerate(factory, settings):
     async with factory() as session:
         assert (await session.scalar(select(Task))).rated_points == 900
     await driver.text(1001, "/menu")
-    await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Другому")
     await driver.text(1001, "Reject this")
     await driver.press(1001, "✅ Создать")
@@ -123,7 +123,7 @@ async def test_template_crud_save_draft_required_points_and_use(factory, setting
             select(TaskTemplate).where(TaskTemplate.title == "Saved template")
         )
     await driver.press(1001, "Отмена")
-    await driver.press(1001, "Шаблоны")
+    await driver.press(1001, "Из шаблона")
     await driver.press(1001, "Новый шаблон")
     await driver.text(1001, "Custom template")
     await driver.text(1001, "600")
@@ -159,7 +159,7 @@ async def test_stale_template_refresh_retains_manual_changes_and_explicit_resubm
 ):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Шаблоны")
+    await driver.press(1001, "Из шаблона")
     await driver.press(1001, "Английский")
     await driver.press(1001, "Создать задачу")
     await driver.press(1001, "Название")
@@ -194,7 +194,7 @@ async def test_template_pages_snapshot_and_peer_requires_acceptance(factory, set
         for i in range(6):
             await service.create(actor, f"Extra {i}", 400, f"extra-{i}", 30)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Шаблоны")
+    await driver.press(1001, "Из шаблона")
     buttons = [b for row in driver.screen(1001).reply_markup.inline_keyboard for b in row]
     assert len([b for b in buttons if b.callback_data.startswith("a:tpl_view:")]) == 5
     await driver.press(1001, "▶️")
@@ -238,7 +238,7 @@ async def test_scopes_whole_user_summary_shared_add_and_semantic_edit_reapproval
             await service.rate(vika, t.id, 100, t.version)
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     assert "План 700 баллов" in driver.screen(1001).text
     await driver.press(1001, "▶️")
     assert "План 700 баллов" in driver.screen(1001).text
@@ -252,7 +252,7 @@ async def test_scopes_whole_user_summary_shared_add_and_semantic_edit_reapproval
     await driver.press(1001, "Plan 0")
     await driver.press(1001, "Начать")
     await driver.text(1002, "/menu")
-    await driver.press(1002, "Все задачи")
+    await driver.press(1002, "Мои задачи")
     await driver.press(1002, "Plan 0")
     await driver.press(1002, "Изменить цену")
     await driver.text(1002, "250")
@@ -286,7 +286,7 @@ async def test_template_page_context_survives_edit_disable_cancel_and_create(fac
         for i in range(6):
             await service.create(actor, f"Paged {i}", 400, f"paged-{i}")
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Шаблоны")
+    await driver.press(1001, "Из шаблона")
     await driver.press(1001, "▶️")
     await driver.press(1001, "Paged 5")
     await driver.press(1001, "Баллы")
@@ -350,7 +350,7 @@ async def test_malformed_new_persisted_forms_restore_dashboard_without_side_effe
         template_count = await session.scalar(select(func.count(TaskTemplate.id)))
     await driver.text(1001, "500")
     assert "Черновик сброшен" in driver.screen(1001).text
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     async with factory() as session:
         assert await session.scalar(select(func.count(Task.id))) == 0
         assert await session.scalar(select(func.count(ScoreEvent.id))) == 0

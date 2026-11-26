@@ -113,6 +113,15 @@ class MemoryRepository(Repository):
 
 
 class MemoryTasks(MemoryRepository, TaskRepository):
+    async def task_tag_names(self, task_id):
+        return []
+
+    async def template_tag_ids(self, template_id):
+        return []
+
+    async def tags_by_ids(self, ids):
+        return []
+
     async def by_operation(self, key):
         from app.models import Task
 

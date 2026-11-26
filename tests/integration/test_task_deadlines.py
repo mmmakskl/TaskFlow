@@ -88,7 +88,7 @@ async def test_peer_overdue_manual_penalty_prefilled_confirmed_and_idempotent(
         task_id, recipient = task.id, peer.id
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Вика")
     await driver.press(1001, "Выполненные" if done else "Просроченные")
     row = next(

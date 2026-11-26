@@ -20,7 +20,7 @@ def test_html_escaped() -> None:
 
 
 @pytest.mark.parametrize(
-    "score,target,percent", [(-100, 10000, "0%"), (7350, 10000, "73%"), (20000, 10000, "100%")]
+    "score,target,percent", [(-100, 10000, "0%"), (7350, 10000, "73%"), (20000, 10000, "200%")]
 )
 def test_progress(score: int, target: int, percent: str) -> None:
     assert progress(score, target).endswith(percent)

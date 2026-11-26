@@ -1,6 +1,6 @@
 """Bounded, escaped notification templates; no database or delivery side effects."""
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from app.bot.render import safe
 from app.models import Notification
@@ -50,3 +50,26 @@ def notification_message(
             None,
         )
     raise ValueError("unsupported_notification")
+
+
+def notification_link(row: Notification, base_url: str) -> InlineKeyboardMarkup | None:
+    if not base_url.startswith("https://"):
+        return None
+    if row.kind == "rating_pending":
+        target = "screen=inbox"
+    elif row.kind in {"rated", "task_rejected"} and type(row.payload.get("task_id")) is int:
+        target = f"screen=tasks&task={row.payload['task_id']}"
+    elif row.kind == "penalty_created":
+        target = "screen=penalties"
+    else:
+        target = "screen=home"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Открыть в TaskFlow",
+                    web_app=WebAppInfo(url=base_url.rstrip("/") + "/miniapp?" + target),
+                )
+            ]
+        ]
+    )

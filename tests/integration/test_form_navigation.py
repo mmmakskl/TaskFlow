@@ -1,5 +1,5 @@
 import pytest
-from aiogram.methods import SendMessage
+from aiogram.methods import SendRichMessage
 from aiogram.types import ReplyKeyboardMarkup
 from sqlalchemy import func, select
 
@@ -24,7 +24,7 @@ def data_for(driver, user_id, label):
 async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Сделать <план>")
     await driver.press(1001, "Название")
@@ -83,7 +83,8 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
     sends = [
         call
         for call in driver.api.calls
-        if isinstance(call, SendMessage) and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+        if isinstance(call, SendRichMessage)
+        and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
     ]
     assert len(sends) == 2
     await driver.bot.session.close()
@@ -93,7 +94,7 @@ async def test_task_estimate_back_edit_clear_and_peer_visibility(factory, settin
 async def test_invalid_estimate_keeps_form(factory, settings, bad):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Estimate")
     await driver.press(1001, "⏱ Время")
@@ -110,7 +111,7 @@ async def test_penalty_all_back_steps_presets_stale_confirmation_and_no_early_sa
 ):
     driver = BotDriver(factory, settings)
     await driver.text(1002, "/menu")
-    await driver.press(1002, "⚠️ Штраф")
+    await driver.press(1002, "Штрафы")
     await driver.press(1002, "Макс")
     await driver.press(1002, "⬅️ Назад")
     assert "Кому?" in driver.screen(1002).text
@@ -265,7 +266,7 @@ async def test_upgrade_from_previous_schema_preserves_existing_task(factory, set
         task = await session.scalar(select(Task))
         assert task.title == "Existing task" and task.estimated_minutes is None
         assert (
-            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0008"
+            await session.scalar(text("SELECT version_num FROM public.alembic_version")) == "0009"
         )
 
 
@@ -286,7 +287,7 @@ async def test_fixed_penalty_back_returns_to_types(factory, settings):
         )
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "⚠️ Штраф")
+    await driver.press(1001, "Штрафы")
     await driver.press(1001, "Макс")
     await driver.press(1001, "▶️")
     await driver.press(1001, "Фиксированный")

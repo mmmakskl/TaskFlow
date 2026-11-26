@@ -2,11 +2,11 @@ from datetime import date
 
 import pytest
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import EditMessageReplyMarkup, EditMessageText, SendMessage
+from aiogram.methods import EditMessageReplyMarkup, EditMessageText, SendMessage, SendRichMessage
 from aiogram.types import CallbackQuery, Chat, Message, User
 
 from app.bot.callbacks.actions import callback
@@ -130,7 +130,7 @@ async def test_render_uses_markup_only_when_text_matches_and_ignores_no_change(s
     await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
     await render(bot, 1001, state, "Text", keyboard([button("B", "menu")]))
     assert isinstance(api.calls[-1], EditMessageReplyMarkup)
-    assert len([call for call in api.calls if isinstance(call, SendMessage)]) == 1
+    assert len([call for call in api.calls if isinstance(call, SendRichMessage)]) == 1
     original = api.make_request
 
     async def no_change(bot, method, timeout=None):  # noqa: ASYNC109 - Bot API signature
@@ -142,6 +142,39 @@ async def test_render_uses_markup_only_when_text_matches_and_ignores_no_change(s
     api.make_request = original
     await render(bot, 1001, state, "New text", keyboard([button("B", "menu")]))
     assert isinstance(api.calls[-1], EditMessageText)
+    await bot.session.close()
+
+
+async def test_rich_fallback_only_on_explicit_rejection(state):
+    api = TelegramSession()
+    original = api.make_request
+
+    async def unsupported(bot, method, timeout=None):  # noqa: ASYNC109
+        if isinstance(method, SendRichMessage):
+            raise TelegramBadRequest(method=method, message="method not found")
+        return await original(bot, method, timeout)
+
+    api.make_request = unsupported
+    bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
+    await render(bot, 1001, state, "A\n<b>B</b>", keyboard([button("A", "menu")]))
+    assert isinstance(api.calls[-1], SendMessage)
+    assert (await state.get_data())["rich_unsupported"] is True
+    await bot.session.close()
+
+
+async def test_rich_network_error_never_retries_send(state):
+    api = TelegramSession()
+    calls = []
+
+    async def uncertain(bot, method, timeout=None):  # noqa: ASYNC109
+        calls.append(method)
+        raise TelegramNetworkError(method=method, message="timeout")
+
+    api.make_request = uncertain
+    bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
+    with pytest.raises(TelegramNetworkError):
+        await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
+    assert len(calls) == 1 and isinstance(calls[0], SendRichMessage)
     await bot.session.close()
 
 
@@ -321,3 +354,40 @@ def test_volume_template_draft_requires_valid_calculated_quantity():
     assert draft_valid("TaskForm:draft", {"flow": 1, "key": "draft-key", **draft})
     invalid = {**draft, "template_quantity": True}
     assert not draft_valid("TaskForm:draft", {"flow": 1, "key": "draft-key", **invalid})
+
+
+async def test_rich_fallback_on_unknown_method_404(state):
+    from aiogram.exceptions import TelegramNotFound
+
+    api = TelegramSession()
+    original = api.make_request
+
+    async def unsupported(bot, method, timeout=None):  # noqa: ASYNC109
+        if isinstance(method, SendRichMessage):
+            raise TelegramNotFound(method=method, message="Not Found")
+        return await original(bot, method, timeout)
+
+    api.make_request = unsupported
+    bot = Bot("123456789:TEST_ONLY_TOKEN", session=api)
+    await render(bot, 1001, state, "Text", keyboard([button("A", "menu")]))
+    assert isinstance(api.calls[-1], SendMessage)
+    await bot.session.close()
+
+
+def test_notification_deep_link_targets_the_task_and_inbox():
+    from types import SimpleNamespace
+
+    from app.notifications.messages import notification_link
+
+    rated = SimpleNamespace(kind="rated", payload={"task_id": 42})
+    pending = SimpleNamespace(kind="rating_pending", payload={})
+    assert (
+        notification_link(rated, "https://example.com")
+        .inline_keyboard[0][0]
+        .web_app.url.endswith("/miniapp?screen=tasks&task=42")
+    )
+    assert (
+        notification_link(pending, "https://example.com")
+        .inline_keyboard[0][0]
+        .web_app.url.endswith("/miniapp?screen=inbox")
+    )

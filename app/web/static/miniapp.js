@@ -1,4 +1,6 @@
 const tg = window.Telegram?.WebApp;
+let renderVersion = 0;
+let modalRequest = 0;
 const state = { page: "home", scope: "mine", filter: "all", pageIndex: 0, templatePage: 0, week: 0, historyPage: 0 };
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const fmt = value => Number(value || 0).toLocaleString("ru-RU");
@@ -66,11 +68,13 @@ async function api(path, { method = "GET", body } = {}) {
 }
 
 function openModal(title, content) {
+  modalRequest++;
   document.getElementById("modal").innerHTML = `<div class="handle"></div><div class="modal-head"><h2>${esc(title)}</h2><button class="close" onclick="closeModal()">×</button></div>${content}`;
   document.getElementById("modalWrap").classList.add("open");
   tg?.BackButton?.show();
 }
 function closeModal() {
+  modalRequest++;
   document.getElementById("modalWrap").classList.remove("open");
   if (state.page === "home") tg?.BackButton?.hide();
 }
@@ -78,42 +82,49 @@ function showError(error) {
   document.getElementById("view").innerHTML = `<div class="empty"><b>${icon("cloud", 32)}</b>${esc(error.message || error)}<p><button class="secondary" onclick="render()">Повторить</button></p></div>`;
 }
 function nav() {
-  const items = [["home","home","Обзор"],["tasks","tasks","Задачи"],["new","plus","Создать"],["inbox","inbox","Входящие"],["stars","chart","Звёзды"]];
+  const items = [["home","home","Главная"],["tasks","tasks","Задачи"],["activity","calendar","Активность"],["more","settings","Ещё"]];
   document.getElementById("nav").innerHTML = items.map(([id, glyph, label]) =>
     `<button class="nav ${state.page === id ? "active" : ""} ${id === "new" ? "add" : ""}" aria-label="${label}" onclick="${id === "new" ? "openTaskForm()" : `go('${id}')`}"><b>${icon(glyph, 21)}</b><span>${label}</span></button>`).join("");
 }
-function go(page) { state.page = page; state.pageIndex = 0; render(); }
+function go(page) { modalRequest++; state.page = page; state.pageIndex = 0; render(); }
 function taskRow(task) {
   const [label, color] = statusInfo[task.status] || statusInfo.BACKLOG;
   const epic = task.subtask_summary?.count ? `<div class="task-meta"><span>${icon("tasks", 13)} ${task.subtask_summary.done_count}/${task.subtask_summary.count} подзадач</span><span>Детали · ✦ ${fmt(task.subtask_summary.agreed_points)}</span></div>` : "";
-  return `<article class="task-card" onclick="taskDetail(${task.id})"><div class="check" aria-hidden="true"></div><div class="task-body"><div class="task-title">${task.kind === "SHARED" ? `${icon("people", 16)} ` : ""}${esc(task.title)}</div><div class="task-meta"><span class="badge ${color}">${label}</span><span>${icon("clock", 13)} ${task.deadline ? esc(formatDate(task.deadline)) : "Без срока"}</span>${task.owner ? `<span>· ${esc(task.owner)}</span>` : ""}</div>${epic}</div>${task.points ? `<div class="task-points">✦ ${fmt(task.points)}</div>` : ""}</article>`;
+  return `<article class="task-card" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();taskDetail(${task.id})}" onclick="taskDetail(${task.id})"><div class="check" aria-hidden="true"></div><div class="task-body"><div class="task-title">${task.kind === "SHARED" ? `${icon("people", 16)} ` : ""}${esc(task.title)}</div><div class="task-meta"><span class="badge ${color}">${label}</span><span>${icon("clock", 13)} ${task.deadline ? esc(formatDate(task.deadline)) : "Без срока"}</span>${task.owner ? `<span>· ${esc(task.owner)}</span>` : ""}</div>${(task.tags||[]).map(tag=>`<span class="tag-chip">${esc(tag.name)}</span>`).join("")}${epic}</div>${task.points ? `<div class="task-points">✦ ${fmt(task.points)}</div>` : ""}</article>`;
 }
 function personCard(score, ownId) {
   const percent = Math.max(0, Math.min(100, Math.round(score.net * 100 / score.target)));
   return `<div class="person-card"><div class="person-head"><span class="avatar">${icon("user", 16)}</span>${score.user_id === ownId ? "ТВОЙ ПРОГРЕСС" : esc(score.name.toUpperCase())}</div><div class="person-points">${fmt(score.net)} <small>/ ${fmt(score.target)}</small></div><div class="mini-bar"><i style="width:${percent}%;background:${score.user_id === ownId ? "#3988f7" : "#27b889"}"></i></div></div>`;
 }
-async function homePage() {
+async function homePage(renderToken = renderVersion) {
   const data = await api("/api/miniapp/bootstrap");
   window.tfTimezone = data.user.timezone;
   document.getElementById("profileName").textContent = data.user.name;
   const own = data.week.scores.find(s => s.user_id === data.user.id);
   const percent = Math.max(0, Math.min(100, Math.round(own.net * 100 / own.target)));
   const active = data.active_preview || [];
-  document.getElementById("view").innerHTML = `<div class="greeting"><div><div class="eyebrow">${esc(data.week.label)}</div><h1>Привет, ${esc(data.user.name)} 👋</h1></div><div class="week-chip">Эта неделя</div></div><section class="hero"><div class="hero-head"><div><div class="hero-label">ТВОЙ РЕЗУЛЬТАТ ЗА НЕДЕЛЮ</div><div class="hero-total">${fmt(own.net)} <small>/ ${fmt(own.target)} ✦</small></div></div><div class="goal-ring"><span>${percent}%</span></div></div><div class="progress"><i style="width:${percent}%"></i></div><div class="hero-foot"><span>${icon("check",14)} Задачи +${fmt(own.earned)}</span><span>${icon("warning",14)} Штрафы −${fmt(own.lost)}</span></div></section><div class="duo">${data.week.scores.map(s => personCard(s, data.user.id)).join("")}</div><div class="section-head"><h2>Мой фокус</h2><button class="text-btn" onclick="go('tasks')">Все задачи →</button></div><div class="metrics"><div class="stat"><div class="stat-icon">${icon("pin")}</div><div class="stat-num">${data.active_count}</div><div class="stat-label">Активные</div></div><div class="stat"><div class="stat-icon">${icon("inbox")}</div><div class="stat-num">${data.pending_count}</div><div class="stat-label">Согласование</div></div><div class="stat"><div class="stat-icon">✦</div><div class="stat-num">${fmt(own.net)}</div><div class="stat-label">Баллы недели</div></div></div><div class="section-head"><h2>Текущие задачи</h2><button class="text-btn" onclick="go('tasks')">Смотреть все →</button></div>${active.length ? active.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>План свободен. Создай задачу или открой входящие.</div>`}<div class="section-head"><h2>Быстрый доступ</h2></div><div class="shortcuts"><button class="shortcut" onclick="go('inbox')"><span class="tile">${icon("inbox",18)}</span><span>Входящие<small>${data.pending_count} ждут ответа</small></span></button><button class="shortcut" onclick="go('templates')"><span class="tile">${icon("book")}</span><span>Шаблоны<small>Создать быстрее</small></span></button><button class="shortcut" onclick="go('penalties')"><span class="tile">${icon("warning")}</span><span>Штрафы<small>Список и типы</small></span></button><button class="shortcut" onclick="go('settings')"><span class="tile">${icon("settings")}</span><span>Настройки<small>Цель и часовой пояс</small></span></button></div>`;
+  if (renderToken !== renderVersion) return;
+  document.getElementById("view").innerHTML = `<div class="greeting"><div><div class="eyebrow">${esc(data.week.label)}</div><h1>Привет, ${esc(data.user.name)} 👋</h1></div><div class="week-chip">Эта неделя</div></div><section class="hero"><div class="hero-head"><div><div class="hero-label">ТВОЙ РЕЗУЛЬТАТ ЗА НЕДЕЛЮ</div><div class="hero-total">${fmt(own.net)} <small>/ ${fmt(own.target)} ✦</small></div></div><div class="goal-ring"><span>${percent}%</span></div></div><div class="progress"><i style="width:${percent}%"></i></div><div class="hero-foot"><span>${icon("check",14)} Задачи +${fmt(own.earned)}</span><span>${icon("warning",14)} Штрафы −${fmt(own.lost)}</span></div></section><div class="duo">${data.week.scores.map(s => personCard(s, data.user.id)).join("")}</div><div class="section-head"><h2>Мой фокус</h2><button class="text-btn" onclick="go('tasks')">Все задачи →</button></div><div class="metrics"><div class="stat"><div class="stat-icon">${icon("pin")}</div><div class="stat-num">${data.active_count}</div><div class="stat-label">Активные</div></div><div class="stat"><div class="stat-icon">${icon("inbox")}</div><div class="stat-num">${data.pending_count}</div><div class="stat-label">Согласование</div></div><div class="stat"><div class="stat-icon">✦</div><div class="stat-num">${fmt(own.net)}</div><div class="stat-label">Баллы недели</div></div></div><div class="section-head"><h2>Текущие задачи</h2><button class="text-btn" onclick="go('tasks')">Смотреть все →</button></div>${active.length ? active.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>План свободен. Создай задачу или открой входящие.</div>`}<div class="section-head"><h2>Быстрый доступ</h2></div><div class="shortcuts"><button class="shortcut" onclick="go('inbox')"><span class="tile">${icon("inbox",18)}</span><span>Входящие<small>${data.pending_count} ждут ответа</small></span></button><button class="shortcut" onclick="go('templates')"><span class="tile">${icon("book")}</span><span>Шаблоны<small>Создать быстрее</small></span></button><button class="shortcut" onclick="openTaskForm()"><span class="tile">${icon("plus")}</span><span>Новая задача<small>Создать вручную</small></span></button><button class="shortcut" onclick="go('settings')"><span class="tile">${icon("settings")}</span><span>Настройки<small>Цель и часовой пояс</small></span></button></div>`;
 }
-async function tasksPage() {
+async function tasksPage(renderToken = renderVersion) {
   const params = new URLSearchParams({ scope: state.scope, filter: state.filter, page: state.pageIndex });
+  if (state.search) params.set("search", state.search);
+  if (state.tagId) params.set("tag_id", state.tagId);
   const data = await api(`/api/miniapp/tasks?${params}`);
   const summary = data.summary;
-  document.getElementById("view").innerHTML = `<h1 class="page-title">Задачи</h1><p class="sub">Общий план для вас двоих</p>${summary ? `<div class="summary-row"><div class="summary-pill"><strong>${fmt(summary.todo_points)}</strong> к выполнению</div><div class="summary-pill"><strong>${fmt(summary.in_progress_points)}</strong> в работе</div><div class="summary-pill"><strong>${fmt(summary.planned_points)}</strong> план ✦</div></div>` : ""}<div class="tabscope">${[["mine","Мои"],["peer","Партнёра"],["shared","Общие"],["assigned","Создал"]].map(([key,label]) => `<button class="${state.scope === key ? "active" : ""}" onclick="setScope('${key}')">${label}</button>`).join("")}</div><div class="filters">${[["all","Все"],["active","Активные"],["work","В работе"],["backlog","Согласование"],["done","Готово"],["archive","Архив"],["overdue","Просроченные"]].map(([key,label]) => `<button class="${state.filter === key ? "active" : ""}" onclick="setFilter('${key}')">${label}</button>`).join("")}</div>${data.items.length ? data.items.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>Здесь пока нет задач</div>`}<div class="modal-actions"><button class="secondary" ${data.page <= 0 ? "disabled" : ""} onclick="turnPage(-1)">← Назад</button><span class="summary-pill">${data.page + 1} · ${Math.max(1, Math.ceil(data.count / 5))}</span><button class="secondary" ${((data.page + 1) * 5 >= data.count) ? "disabled" : ""} onclick="turnPage(1)">Далее →</button></div><button class="primary" style="margin-top:14px" onclick="openTaskForm()">＋ Новая задача</button>`;
+  const tags = listItems(await api("/api/miniapp/tags"));
+  if (renderToken !== renderVersion) return;
+  document.getElementById("view").innerHTML = `<h1 class="page-title">Задачи</h1><p class="sub">Общий план для вас двоих</p>${summary ? `<div class="summary-row"><div class="summary-pill"><strong>${fmt(summary.todo_points)}</strong> к выполнению</div><div class="summary-pill"><strong>${fmt(summary.in_progress_points)}</strong> в работе</div><div class="summary-pill"><strong>${fmt(summary.planned_points)}</strong> план ✦</div></div>` : ""}<div class="field"><label for="taskSearch">Поиск</label><input id="taskSearch" type="search" value="${esc(state.search || "")}" onchange="state.search=this.value;state.pageIndex=0;render()" placeholder="Название задачи"></div><div class="field"><label for="taskTagFilter">Тег</label><select id="taskTagFilter" onchange="state.tagId=this.value;state.pageIndex=0;render()"><option value="">Все теги</option>${tags.filter(t=>!t.archived).map(t=>`<option value="${t.id}" ${String(state.tagId||"")===String(t.id)?"selected":""}>${esc(t.name)}</option>`).join("")}</select><button class="text-btn" onclick="state.search='';state.tagId='';state.filter='all';state.scope='mine';state.pageIndex=0;render()">Очистить фильтры</button></div><div class="tabscope">${[["mine","Мои"],["peer","Партнёра"],["shared","Общие"],["assigned","Создал"]].map(([key,label]) => `<button class="${state.scope === key ? "active" : ""}" onclick="setScope('${key}')">${label}</button>`).join("")}</div><div class="filters">${[["all","Все"],["active","Активные"],["work","В работе"],["backlog","Согласование"],["done","Готово"],["archive","Архив"],["overdue","Просроченные"]].map(([key,label]) => `<button class="${state.filter === key ? "active" : ""}" onclick="setFilter('${key}')">${label}</button>`).join("")}</div>${data.items.length ? data.items.map(taskRow).join("") : `<div class="empty"><b>${icon("sun",32)}</b>Здесь пока нет задач</div>`}<div class="modal-actions"><button class="secondary" ${data.page <= 0 ? "disabled" : ""} onclick="turnPage(-1)">← Назад</button><span class="summary-pill">${data.page + 1} · ${Math.max(1, Math.ceil(data.count / 5))}</span><button class="secondary" ${((data.page + 1) * 5 >= data.count) ? "disabled" : ""} onclick="turnPage(1)">Далее →</button></div><button class="primary" style="margin-top:14px" onclick="openTaskForm()">＋ Новая задача</button>`;
 }
 function setScope(value) { state.scope = value; state.pageIndex = 0; render(); }
 function setFilter(value) { state.filter = value; state.pageIndex = 0; render(); }
 function turnPage(delta) { state.pageIndex = Math.max(0, state.pageIndex + delta); render(); }
 
-async function taskDetail(id) {
+async function taskDetail(id, activityReturn = null) {
+  const request = ++modalRequest;
   try {
     const t = await api(`/api/miniapp/tasks/${id}`);
+    if (request !== modalRequest) return;
     const [label,color] = statusInfo[t.status];
     const actions = [];
     if (t.is_evaluator) actions.push(`<button class="primary" onclick="openRate(${t.id},${t.version},${t.proposed_points || "null"})">${icon("stars",16)} Оценить / принять</button>`);
@@ -133,7 +144,7 @@ async function taskDetail(id) {
       : `<div class="section-head"><h2>Подзадачи · ${t.subtask_summary.done_count}/${t.subtask_summary.count}</h2></div><div class="panel"><div class="setting-row"><span>Прогресс</span><b>${t.subtask_summary.progress}%</b></div><div class="setting-row"><span>Сумма согласованных оценок</span><b>✦ ${fmt(t.subtask_summary.agreed_points)}</b></div><div class="setting-row"><span>Бонус эпика</span><b>${t.bonus_points ? `✦ ${fmt(t.bonus_points)}` : "Согласуется отдельно"}</b></div></div>${t.children.map(c => {const [cl,cc]=statusInfo[c.status]||statusInfo.BACKLOG;return `<div class="task-card" onclick="taskDetail(${c.id})"><div class="task-body"><div class="task-title">${esc(c.title)}</div><div class="task-meta"><span class="badge ${cc}">${cl}</span><span>${c.points ? `✦ ${fmt(c.points)}` : "Оценка на согласовании"}</span></div></div>${t.can_manage && !["DONE","CANCELLED"].includes(t.status)?`<button class="text-btn" onclick="event.stopPropagation();detachSubtask(${t.id},${t.version},${c.id},${c.version})">Убрать</button>`:""}</div>`}).join("")}${t.can_manage && !["DONE","CANCELLED"].includes(t.status) ? `<button class="primary" style="margin-top:8px" onclick="createSubtask(${t.id},${t.version})">＋ Создать подзадачу</button><button class="secondary" style="margin-top:8px" onclick="attachSubtaskForm(${t.id},${t.version})">↳ Добавить существующую задачу</button>` : ""}`;
     const blockerSection = t.blockers.length ? `<div class="section-head"><h2>Заблокировано</h2></div><div class="panel">${t.blockers.map(b=>`<div class="setting-row"><span>${esc(b.title)}</span><b>${statusInfo[b.status]?.[0]||b.status}</b></div>`).join("")}</div>` : "";
     const linkSection = `<div class="section-head"><h2>Связанные задачи</h2></div><div class="panel">${t.links.map(link=>`<div class="setting-row"><button class="text-btn" onclick="taskDetail(${link.task_id})">${link.kind === "DEPENDS_ON" ? "Зависит от" : "Связана с"}: ${esc(link.title)}</button>${t.can_manage?`<button class="text-btn" onclick="removeTaskLink(${link.id},${link.version},${t.id})">Убрать</button>`:""}</div>`).join("")||`<div class="setting-row"><span>Пока нет связей</span></div>`}</div>${t.can_manage ? `<button class="secondary" style="margin-top:8px" onclick="createTaskLinkForm(${t.id},${t.version})">＋ Связать задачу</button>` : ""}`;
-    openModal("Задача", `<div class="badge ${color}">${label}</div><h2 style="font-size:20px;margin:12px 0">${esc(t.title)}</h2><div class="panel"><div class="setting-row"><span>Исполнители</span><b>${esc(t.participants.join(", "))}</b></div><div class="setting-row"><span>Оценка</span><b>${t.points ? `✦ ${fmt(t.points)}${t.kind === "SHARED" ? " каждому" : ""}` : "На оценку"}</b></div><div class="setting-row"><span>Дедлайн</span><b>${t.deadline ? esc(formatDate(t.deadline,{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})) : "Без срока"}</b></div><div class="setting-row"><span>План</span><b>${t.estimated_minutes || "—"} мин.</b></div><div class="setting-row"><span>Предложил</span><b>${esc(t.proposal_by)}</b></div>${t.awarded_points ? `<div class="setting-row"><span>Начислено</span><b>✦ ${fmt(t.awarded_points)}</b></div>` : ""}${t.template_snapshot?.quantity ? `<div class="setting-row"><span>Объём по шаблону</span><b>${esc(templateVolumeText(t.template_snapshot))}</b></div>` : ""}</div>${t.comment ? `<p class="sub" style="margin-top:12px">${esc(t.comment)}</p>` : ""}${blockerSection}${subtaskSection}${linkSection}<div style="display:grid;gap:8px;margin-top:14px">${actions.join("")}${editable ? `<button class="secondary" onclick="openTaskForm(${t.id})">${icon("edit",16)} Изменить</button>` : ""}${editable ? `<button class="danger" onclick="confirmTaskAction(${t.id},${t.version},'CANCELLED')">В архив</button>` : ""}</div>`);
+    openModal("Задача", `${activityReturn ? `<button class="text-btn" onclick="activityDay(${activityReturn.tracker},'${activityReturn.date}',${activityReturn.page})">← К выбранному дню</button>` : ""}<div class="badge ${color}">${label}</div><h2 style="font-size:20px;margin:12px 0">${esc(t.title)}</h2><div class="panel"><div class="setting-row"><span>Теги</span><b>${(t.tags||[]).map(tag=>esc(tag.name)).join(", ") || "Нет"}</b></div><div class="setting-row"><span>Исполнители</span><b>${esc(t.participants.join(", "))}</b></div><div class="setting-row"><span>Оценка</span><b>${t.points ? `✦ ${fmt(t.points)}${t.kind === "SHARED" ? " каждому" : ""}` : "На оценку"}</b></div><div class="setting-row"><span>Дедлайн</span><b>${t.deadline ? esc(formatDate(t.deadline,{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})) : "Без срока"}</b></div><div class="setting-row"><span>План</span><b>${t.estimated_minutes || "—"} мин.</b></div><div class="setting-row"><span>Предложил</span><b>${esc(t.proposal_by)}</b></div>${t.awarded_points ? `<div class="setting-row"><span>Начислено</span><b>✦ ${fmt(t.awarded_points)}</b></div>` : ""}${t.template_snapshot?.quantity ? `<div class="setting-row"><span>Объём по шаблону</span><b>${esc(templateVolumeText(t.template_snapshot))}</b></div>` : ""}</div>${t.comment ? `<p class="sub" style="margin-top:12px">${esc(t.comment)}</p>` : ""}${blockerSection}${subtaskSection}${linkSection}<div style="display:grid;gap:8px;margin-top:14px">${actions.join("")}${t.can_manage ? `<button class="secondary" onclick="editEntityTags('tasks',${t.id},${t.version})">Теги</button>` : ""}${editable ? `<button class="secondary" onclick="openTaskForm(${t.id})">${icon("edit",16)} Изменить</button>` : ""}${editable ? `<button class="danger" onclick="confirmTaskAction(${t.id},${t.version},'CANCELLED')">В архив</button>` : ""}</div>`);
   } catch (error) { toast(error.message); }
 }
 function templateUsageField(template) {
@@ -142,7 +153,7 @@ function templateUsageField(template) {
   const unit = timeMode ? "минут" : esc(template.unit_label);
   return {
     volume: true,
-    field: `<div class="field volume-field"><label>Фактический объём · ${unit}</label><div class="volume-input-wrap"><input id="templateQuantity" name="template_quantity" type="number" min="1" max="${timeMode?10080:10000}" required inputmode="numeric" oninput="updateTemplateReward(${template.points},${template.base_quantity},${JSON.stringify(template.pricing_mode)})" placeholder="Укажи объём"></div><small class="volume-hint" id="templateRewardHint">Цена рассчитается по объёму</small></div>`
+    field: `<div class="field volume-field"><label>Фактический объём · ${unit}</label><div class="volume-input-wrap"><input id="templateQuantity" name="template_quantity" type="number" min="1" max="${timeMode?10080:10000}" required inputmode="numeric" oninput="updateTemplateReward(${template.points},${template.base_quantity},'${timeMode?'PER_TIME':'PER_QUANTITY'}')" placeholder="Укажи объём"></div><small class="volume-hint" id="templateRewardHint">Цена рассчитается по объёму</small></div>`
   };
 }
 function updateTemplateReward(basePoints, baseQuantity, mode) {
@@ -166,6 +177,9 @@ async function openTaskForm(id = 0, task = null, templateId = 0, parent = null) 
     template = await api(`/api/miniapp/templates/${templateId}`).catch(error => { toast(error.message); return null; });
     if (!template) return;
   }
+  const availableTags = listItems(await api("/api/miniapp/tags"));
+  const selectedTags = new Set((task?.tags || template?.tags || []).map(t=>t.id));
+  const tagFields = tagSelector(availableTags, selectedTags);
   const editing = Boolean(id);
   const usage=templateUsageField(template);
   const priceValue=usage.volume?"":(template?.points||"");
@@ -173,7 +187,7 @@ async function openTaskForm(id = 0, task = null, templateId = 0, parent = null) 
   const fields = editing
     ? `<input type="hidden" name="version" value="${task.version}"><div class="field"><label>Название · изменение потребует повторного согласования</label><input name="title" maxlength="200" required value="${esc(task.title)}"></div><div class="field"><label>Дедлайн</label><input name="deadline" type="date" value="${task.deadline ? task.deadline.slice(0,10) : ""}"></div><div class="field"><label>План, минут</label><input name="estimated_minutes" type="number" min="1" max="10080" value="${task.estimated_minutes || ""}"></div><div class="field"><label>Комментарий</label><textarea name="comment" maxlength="1500">${esc(task.comment || "")}</textarea></div>`
     : `<input type="hidden" name="operation_key" value="${requestKey()}">${parent ? `<input type="hidden" name="parent_task_id" value="${parent.id}"><input type="hidden" name="parent_version" value="${parent.version}"><div class="setting-row"><span>Подзадача для эпика</span><b>${esc(parent.title || `#${parent.id}`)}</b></div>` : ""}<div class="field"><label>Название задачи</label><input name="title" maxlength="200" required value="${esc(template?.title || "")}" placeholder="Например, подготовить презентацию"></div><div class="field"><label>${parent ? "Исполнитель · как в эпике" : "Для кого"}</label><div class="choice-row">${[["SELF","Себе"],["PEER","Партнёру"],["SHARED","Вместе"]].map(([value,label]) => `<button type="button" class="choice ${value === (parent?.target || "SELF") ? "selected" : ""}" data-target="${value}" ${parent ? "disabled" : ""} onclick="selectTarget(this)">${label}</button>`).join("")}</div><input type="hidden" name="target" value="${parent?.target || "SELF"}"></div>${usage.field}${priceInput}<div class="field"><label>Дедлайн</label><input name="deadline" type="date"></div><div class="field"><label>План, минут</label><input name="estimated_minutes" type="number" min="1" max="10080" value="${template?.estimated_minutes || ""}"></div><div class="field"><label>Комментарий</label><textarea name="comment" maxlength="1500"></textarea></div>${template ? `<input type="hidden" name="template_id" value="${template.id}"><input type="hidden" name="template_version" value="${template.version}">` : ""}`;
-  openModal(editing ? "Изменить задачу" : "Новая задача", `<form onsubmit="saveTask(event,${id})">${fields}<div class="modal-actions"><button type="button" class="secondary" onclick="closeModal()">Отмена</button><button type="submit" class="primary" ${usage.volume?"disabled":""}>${editing ? "Сохранить" : "Создать задачу"}</button></div></form>`);
+  openModal(editing ? "Изменить задачу" : "Новая задача", `<form onsubmit="saveTask(event,${id})">${fields}${tagFields}<div class="modal-actions"><button type="button" class="secondary" onclick="closeModal()">Отмена</button><button type="submit" class="primary" ${usage.volume?"disabled":""}>${editing ? "Сохранить" : "Создать задачу"}</button></div></form>`);
 }
 function selectTarget(button) {
   button.parentNode.querySelectorAll(".choice").forEach(item => item.classList.remove("selected"));
@@ -185,13 +199,14 @@ async function saveTask(event, id) {
   const data = Object.fromEntries(new FormData(event.target));
   const date = data.deadline || null;
   try {
+    const tag_ids = new FormData(event.target).getAll("tag_id").map(Number);
     if (id) {
-      const body = { version: Number(data.version), title: data.title, deadline: date,
+      const body = { tag_ids, version: Number(data.version), title: data.title, deadline: date,
         estimated_minutes: data.estimated_minutes ? Number(data.estimated_minutes) : null,
         comment: data.comment || null };
       await api(`/api/miniapp/tasks/${id}`, { method: "PATCH", body });
     } else {
-      const body = { title: data.title, target: data.target,
+      const body = { tag_ids, title: data.title, target: data.target,
         proposed_points: data.proposed_points ? Number(data.proposed_points) : null,
         deadline: date, estimated_minutes: data.estimated_minutes ? Number(data.estimated_minutes) : null,
         template_quantity: data.template_quantity ? Number(data.template_quantity) : null,
@@ -257,8 +272,9 @@ function submitRate(id, version, rerate) {
   closeModal(); taskAction(id,version,"RATE",false,points);
 }
 
-async function inboxPage() {
+async function inboxPage(renderToken = renderVersion) {
   const data = await api(`/api/miniapp/inbox?page=${state.pageIndex}`);
+  if (renderToken !== renderVersion) return;
   document.getElementById("view").innerHTML = `<h1 class="page-title">Входящие</h1><p class="sub">Предложения, которые ждут твоего решения · ${data.count}</p>${data.items.length ? data.items.map(t => `<div class="approval"><div style="display:flex;justify-content:space-between"><span class="badge orange">${t.owner === document.getElementById("profileName").textContent ? "Нужно оценить" : "Предложение"}</span><span class="task-points">${t.proposed_points ? `✦ ${fmt(t.proposed_points)}` : "Оценка нужна"}${t.kind === "SHARED" ? " каждому" : ""}</span></div><h3 style="font-size:15px;margin:12px 0 5px">${esc(t.title)}</h3><div class="task-meta">От ${esc(t.proposal_by)} · ${t.deadline ? esc(new Date(t.deadline).toLocaleDateString("ru-RU")) : "Без срока"} · ${t.estimated_minutes || "—"} мин.</div><div class="approval-actions"><button class="primary" style="padding:10px" onclick="openRate(${t.id},${t.version},${t.proposed_points || "null"})">${icon("stars",16)} Оценить / принять</button><button class="secondary" onclick="rejectTask(${t.id},${t.version})">Отклонить</button></div></div>`).join("") : `<div class="empty"><b>${icon("inbox",28)}</b>Нет предложений для оценки</div>`}<div class="modal-actions"><button class="secondary" ${state.pageIndex<=0?"disabled":""} onclick="state.pageIndex--;render()">← Назад</button><span class="summary-pill">${state.pageIndex+1}</span><button class="secondary" ${(state.pageIndex+1)*5>=data.count?"disabled":""} onclick="state.pageIndex++;render()">Далее →</button></div>`;
 }
 function rejectTask(id, version) { confirmDialog("Отклонить предложение?","Задача будет отменена и не попадёт в план.","Отклонить",() => taskAction(id,version,"REJECT",true),true); }
@@ -305,7 +321,7 @@ function trendUserCard(user, weeks) {
     <div class="trend-progress"><i style="width:${percent}%"></i></div>
     <div class="trend-subtotals"><span>${icon("check", 13)} Начислено <b>+${fmt(totals.earned)}</b></span><span>${icon("warning", 13)} Штрафы <b>−${fmt(totals.lost)}</b></span></div></article>`;
 }
-async function starsPage() {
+async function starsPage(renderToken = renderVersion) {
   const [trend, history] = await Promise.all([
     api(`/api/miniapp/results/trend?weeks=${state.trendWeeks || 5}`),
     api(`/api/miniapp/results/history?page=${state.historyPage}`)
@@ -319,6 +335,7 @@ async function starsPage() {
     <div class="trend-week-title"><span>${icon("calendar", 16)} ${esc(week.label)}</span><span class="badge">Неделя</span></div>
     ${week.scores.map((score, index) => `<div class="trend-person-row"><span class="trend-person-name"><i class="legend-dot person-${index}"></i>${esc(score.name)}</span><span>+${fmt(score.earned)} <small>−${fmt(score.lost)}</small></span><b>${fmt(score.net)} ✦</b></div>`).join("")}
   </article>`).join("");
+  if (renderToken !== renderVersion) return;
   document.getElementById("view").innerHTML = `<div class="analytics-heading"><div><div class="eyebrow">${icon("chart", 14)} АНАЛИТИКА</div><h1 class="page-title">Статистика</h1><p class="sub">Баланс по неделям · оба участника</p></div></div>
     <div class="period-picker" aria-label="Период статистики">${periodButtons}</div>
     <div class="trend-user-grid">${users.map(user => trendUserCard(user, weeks)).join("")}</div>
@@ -338,10 +355,11 @@ function templatePriceLabel(template) {
   if (template.pricing_mode === "PER_QUANTITY") return `${fmt(template.points)} ✦ / ${fmt(template.base_quantity)} ${esc(template.unit_label)}`;
   return `${fmt(template.points)} ✦ · фиксированно`;
 }
-async function templatePage() {
+async function templatePage(renderToken = renderVersion) {
   const data = await api(`/api/miniapp/templates?include_inactive=true&page=${state.templatePage}`);
   const lastPage = Math.max(0, Math.ceil(data.count / 5) - 1);
   if (state.templatePage > lastPage) { state.templatePage = lastPage; return templatePage(); }
+  if (renderToken !== renderVersion) return;
   document.getElementById("view").innerHTML = `<h1 class="page-title">Шаблоны</h1><p class="sub">Готовые задачи с понятным расчётом баллов</p>${data.items.map(t=>`<div class="task-card template-card" onclick="templateActions(${t.id})"><div class="tile template-tile">${icon(t.pricing_mode === "FIXED" ? "book" : t.pricing_mode === "PER_TIME" ? "clock" : "target",19)}</div><div class="task-body"><div class="task-title">${esc(t.title)}</div><div class="task-meta">${t.is_active?"Включён":"Выключен"} · ${esc(templatePriceLabel(t))}</div></div>${icon("arrow",17)}</div>`).join("")}${data.items.length?"":`<div class="empty"><b>${icon("book",32)}</b>Создай первый шаблон</div>`}<div class="modal-actions"><button class="secondary" ${state.templatePage===0?"disabled":""} onclick="state.templatePage--;render()">← Назад</button><span class="summary-pill">${state.templatePage+1} · ${lastPage+1}</span><button class="secondary" ${state.templatePage>=lastPage?"disabled":""} onclick="state.templatePage++;render()">Далее →</button></div><button class="primary" onclick="openTemplateForm()">${icon("plus",16)} Создать шаблон</button>`;
 }
 async function templateActions(id) {
@@ -352,12 +370,14 @@ async function templateActions(id) {
       : item.pricing_mode === "PER_QUANTITY"
       ? `<div class="setting-row"><span>Ставка</span><b>${fmt(item.points)} ✦ за ${fmt(item.base_quantity)} ${esc(item.unit_label)}</b></div>`
       : `<div class="setting-row"><span>Цена</span><b>${fmt(item.points)} ✦</b></div>`;
-    openModal("Шаблон", `<h2 style="margin:8px 0">${esc(item.title)}</h2><div class="panel">${pricing}<div class="setting-row"><span>План</span><b>${item.estimated_minutes?`${item.estimated_minutes} мин.`:"—"}</b></div><div class="setting-row"><span>Статус</span><b>${item.is_active?"Включён":"Выключен"}</b></div></div><div style="display:grid;gap:8px;margin-top:14px">${item.is_active?`<button class="primary" onclick="closeModal();openTaskForm(0,null,${id})">${icon("plus",16)} Создать задачу из шаблона</button>`:""}<button class="secondary" onclick="closeModal();openTemplateForm(${id})">${icon("edit",16)} Изменить</button><button class="secondary" onclick="templateToggle(${id},${version},${!item.is_active})">${item.is_active?"Выключить":"Включить"}</button><button class="danger" onclick="templateDelete(${id},${version})">${icon("trash",16)} Удалить шаблон</button></div>`);
+    openModal("Шаблон", `<h2 style="margin:8px 0">${esc(item.title)}</h2><div class="panel">${pricing}<div class="setting-row"><span>План</span><b>${item.estimated_minutes?`${item.estimated_minutes} мин.`:"—"}</b></div><div class="setting-row"><span>Статус</span><b>${item.is_active?"Включён":"Выключен"}</b></div></div><div style="display:grid;gap:8px;margin-top:14px">${item.is_active?`<button class="primary" onclick="closeModal();openTaskForm(0,null,${id})">${icon("plus",16)} Создать задачу из шаблона</button>`:""}<button class="secondary" onclick="editEntityTags('templates',${id},${version})">Теги</button><button class="secondary" onclick="closeModal();openTemplateForm(${id})">${icon("edit",16)} Изменить</button><button class="secondary" onclick="templateToggle(${id},${version},${!item.is_active})">${item.is_active?"Выключить":"Включить"}</button><button class="danger" onclick="templateDelete(${id},${version})">${icon("trash",16)} Удалить шаблон</button></div>`);
   } catch(error) { toast(error.message); }
 }
 async function openTemplateForm(templateId=0) {
   let item=null;
   if(templateId){item=await api(`/api/miniapp/templates/${templateId}`).catch(e=>{toast(e.message);return null});if(!item)return;}
+  const tags=listItems(await api("/api/miniapp/tags"));
+  const tagFields=tagSelector(tags,new Set((item?.tags||[]).map(t=>t.id)));
   const mode=item?.pricing_mode||"FIXED";
   openModal(item?"Изменить шаблон":"Новый шаблон", `<form id="templateForm" onsubmit="saveTemplate(event,${item?.id||0})">${item?`<input type="hidden" name="version" value="${item.version}">`:`<input type="hidden" name="operation_key" value="${requestKey()}">`}
     <div class="field"><label>Название</label><input name="title" maxlength="200" required value="${esc(item?.title||"")}"></div>
@@ -366,7 +386,7 @@ async function openTemplateForm(templateId=0) {
     <div class="field" id="baseQuantityField"><label id="baseQuantityLabel">Базовый объём</label><input name="base_quantity" id="baseQuantity" type="number" min="1" max="10080" value="${item?.base_quantity||20}"></div>
     <div class="field" id="unitLabelField"><label>Название единицы</label><input name="unit_label" id="unitLabel" maxlength="40" value="${esc(item?.unit_label||"")}" placeholder="Например, занятие"></div>
     <div class="field"><label>Плановое время (не влияет на баллы)</label><input name="estimated_minutes" type="number" min="1" max="10080" value="${item?.estimated_minutes||""}"></div>
-    <button class="primary">Сохранить шаблон</button></form>`);
+    ${tagFields}<button class="primary">Сохранить шаблон</button></form>`);
   updateTemplatePricingForm();
 }
 function updateTemplatePricingForm(){
@@ -379,12 +399,13 @@ function updateTemplatePricingForm(){
   document.getElementById("baseQuantity").required=mode!=="FIXED";
   document.getElementById("unitLabel").required=mode==="PER_QUANTITY";
 }
-async function saveTemplate(event,id){event.preventDefault();const d=Object.fromEntries(new FormData(event.target));const body={title:d.title,points:+d.points,estimated_minutes:d.estimated_minutes?+d.estimated_minutes:null,pricing_mode:d.pricing_mode,base_quantity:d.pricing_mode==="FIXED"?null:+d.base_quantity,unit_label:d.pricing_mode==="PER_QUANTITY"?d.unit_label:null};try{if(id){body.version=+d.version;await api(`/api/miniapp/templates/${id}`,{method:"PATCH",body})}else{body.operation_key=d.operation_key;await api("/api/miniapp/templates",{method:"POST",body})}closeModal();toast("Шаблон сохранён");render()}catch(e){toast(e.message)}}
+async function saveTemplate(event,id){event.preventDefault();const d=Object.fromEntries(new FormData(event.target));const body={tag_ids:new FormData(event.target).getAll("tag_id").map(Number),title:d.title,points:+d.points,estimated_minutes:d.estimated_minutes?+d.estimated_minutes:null,pricing_mode:d.pricing_mode,base_quantity:d.pricing_mode==="FIXED"?null:+d.base_quantity,unit_label:d.pricing_mode==="PER_QUANTITY"?d.unit_label:null};try{if(id){body.version=+d.version;await api(`/api/miniapp/templates/${id}`,{method:"PATCH",body})}else{body.operation_key=d.operation_key;await api("/api/miniapp/templates",{method:"POST",body})}closeModal();toast("Шаблон сохранён");render()}catch(e){toast(e.message)}}
 function templateToggle(id,version,isActive){api(`/api/miniapp/templates/${id}`,{method:"PATCH",body:{version,is_active:isActive}}).then(()=>{closeModal();render();toast("Статус обновлён")}).catch(e=>toast(e.message))}
 function templateDelete(id,version){confirmDialog("Удалить шаблон?","Созданные по нему задачи сохранят свои условия.","Удалить",async()=>{try{await api(`/api/miniapp/templates/${id}?version=${version}`,{method:"DELETE"});render();toast("Шаблон удалён")}catch(e){toast(e.message)}},true)}
 
-async function penaltyPage() {
+async function penaltyPage(renderToken = renderVersion) {
   const [data, types] = await Promise.all([api(`/api/miniapp/penalties?page=${state.pageIndex}`),allPenaltyTypes(true)]);
+  if (renderToken !== renderVersion) return;
   document.getElementById("view").innerHTML = `<h1 class="page-title">Штрафы</h1><p class="sub">Суммы сохраняются в истории недели</p><button class="primary" onclick="penaltyForm()">＋ Назначить штраф</button><div class="section-head"><h2>Типы штрафов</h2><button class="text-btn" onclick="penaltyTypeForm()">＋ Добавить</button></div><div class="panel">${types.map(t=>`<div class="setting-row"><span>${esc(t.emoji)} ${esc(t.name)}<small>${esc(t.calculation_type)}${t.calculation_type!=="MANUAL"?` · ${fmt(t.rate)} ✦`:""}</small></span><button onclick="penaltyTypeForm(${t.id})">${t.is_active?"Настроить":"Выкл."}</button></div>`).join("")}</div><div class="section-head"><h2>Недавние штрафы</h2></div><div class="panel">${data.items.map(p=>`<div class="setting-row"><span>⚠️ ${esc(p.name)}<small>${esc(p.target)} · ${new Date(p.created_at).toLocaleDateString("ru-RU")}${p.comment?` · ${esc(p.comment)}`:""}</small></span><b style="color:#db6571">−${fmt(p.points)} ✦ <button class="text-btn" onclick="deletePenalty(${p.id},${p.version})">Убрать</button></b></div>`).join("")||`<div class="empty">Штрафов пока нет</div>`}</div>`;
 }
 async function allPenaltyTypes(includeInactive=false){let page=0,items=[],hasNext=true;while(hasNext){const r=await api(`/api/miniapp/penalty-types?include_inactive=${includeInactive}&page=${page++}`);items.push(...r.items);hasNext=r.has_next}return items}
@@ -396,14 +417,14 @@ function deletePenalty(id,version){confirmDialog("Убрать штраф?","Б�
 async function penaltyTypeForm(typeId=0){let item=null;if(typeId){const types=await allPenaltyTypes(true);item=types.find(t=>t.id===typeId)||null}openModal(item?"Настроить тип":"Новый тип штрафа",`<form onsubmit="savePenaltyType(event,${item?.id||0})">${item?`<input type="hidden" name="version" value="${item.version}">`:""}<div class="field"><label>Название</label><input name="name" maxlength="80" required value="${esc(item?.name||"")}"></div><div class="field"><label>Emoji</label><input name="emoji" maxlength="16" required value="${esc(item?.emoji||"⚠️")}"></div><div class="field"><label>Описание</label><input name="description" maxlength="500" value="${esc(item?.description||"")}"></div><div class="field"><label>Расчёт</label><select name="calculation_type"><option value="PER_MINUTE" ${item?.calculation_type==="PER_MINUTE"?"selected":""}>За минуту</option><option value="FIXED" ${item?.calculation_type==="FIXED"?"selected":""}>Фиксированная сумма</option><option value="MANUAL" ${item?.calculation_type==="MANUAL"?"selected":""}>Вручную</option></select></div><div class="field"><label>Ставка</label><input name="rate" type="number" min="0" max="1000000" value="${item?.rate??0}"></div>${item?`<label><input name="is_active" type="checkbox" ${item.is_active?"checked":""}> Тип включён</label>`:""}<button class="primary" style="margin-top:16px">Сохранить</button></form>`)}
 async function savePenaltyType(event,id){event.preventDefault();const d=Object.fromEntries(new FormData(event.target));const body={name:d.name,emoji:d.emoji,description:d.description||"",calculation_type:d.calculation_type,rate:+d.rate};try{if(id){body.version=+d.version;body.is_active=event.target.is_active.checked;await api(`/api/miniapp/penalty-types/${id}`,{method:"PATCH",body})}else await api("/api/miniapp/penalty-types",{method:"POST",body});closeModal();render();toast("Тип штрафа сохранён")}catch(e){toast(e.message)}}
 
-async function settingsPage(){const data=await api("/api/miniapp/settings");document.getElementById("view").innerHTML=`<h1 class="page-title">Настройки</h1><p class="sub">Личная цель и часовой пояс</p><div class="panel"><div class="setting-row"><span>${icon("target",15)} Недельная цель<small>Твоя цель на неделю</small></span><button onclick="editGoal(${data.weekly_target})">${fmt(data.weekly_target)} ✦</button></div><div class="setting-row"><span>${icon("people",15)} Часовой пояс<small>Отображение дедлайнов</small></span><button onclick="editTimezone('${esc(data.timezone)}')">${esc(data.timezone)}</button></div><div class="setting-row"><span>${icon("calendar",15)} Общая неделя<small>Границы подсчёта для обоих</small></span><b>Пн — Вс</b></div></div><div class="section-head"><h2>Разделы</h2></div><div class="shortcuts"><button class="shortcut" onclick="go('templates')"><span class="tile">${icon("book")}</span><span>Шаблоны<small>Общие задачи</small></span></button><button class="shortcut" onclick="go('penalties')"><span class="tile">${icon("warning")}</span><span>Штрафы<small>Типы и история</small></span></button></div>`}
+async function settingsPage(renderToken=renderVersion){const data=await api("/api/miniapp/settings");if(renderToken!==renderVersion)return;document.getElementById("view").innerHTML=`<h1 class="page-title">Настройки</h1><p class="sub">Личная цель и часовой пояс</p><div class="panel"><div class="setting-row"><span>${icon("target",15)} Недельная цель<small>Твоя цель на неделю</small></span><button onclick="editGoal(${data.weekly_target})">${fmt(data.weekly_target)} ✦</button></div><div class="setting-row"><span>${icon("people",15)} Часовой пояс<small>Отображение дедлайнов</small></span><button onclick="editTimezone('${esc(data.timezone)}')">${esc(data.timezone)}</button></div><div class="setting-row"><span>${icon("calendar",15)} Общая неделя<small>Границы подсчёта для обоих</small></span><b>Пн — Вс</b></div></div><div class="section-head"><h2>Разделы</h2></div><div class="shortcuts"><button class="shortcut" onclick="go('templates')"><span class="tile">${icon("book")}</span><span>Шаблоны<small>Общие задачи</small></span></button><button class="shortcut" onclick="go('penalties')"><span class="tile">${icon("warning")}</span><span>Штрафы<small>Типы и история</small></span></button></div>`}
 function editGoal(current){openModal("Недельная цель",`<div class="field"><label>От 1 до 1 000 000 баллов</label><input id="goalValue" type="number" min="1" max="1000000" value="${current}"></div><div class="choice-row">${[5000,10000,15000,20000].map(n=>`<button class="choice" onclick="document.getElementById('goalValue').value=${n}">${fmt(n)}</button>`).join("")}</div><button class="primary" style="margin-top:16px" onclick="saveSettings({weekly_target:+document.getElementById('goalValue').value})">Сохранить</button>`)}
 function editTimezone(current){openModal("Часовой пояс",`<div class="field"><label>Для показа дат и дедлайнов</label><select id="zone"><option value="Europe/Moscow" ${current==="Europe/Moscow"?"selected":""}>Москва · Europe/Moscow</option><option value="Europe/Helsinki" ${current==="Europe/Helsinki"?"selected":""}>Хельсинки · Europe/Helsinki</option><option value="UTC" ${current==="UTC"?"selected":""}>UTC</option></select></div><p class="sub">Общая неделя результатов остаётся прежней.</p><button class="primary" onclick="saveSettings({timezone:document.getElementById('zone').value})">Сохранить</button>`)}
 async function saveSettings(body){try{await api("/api/miniapp/settings",{method:"PATCH",body});closeModal();toast("Настройки сохранены");render()}catch(e){toast(e.message)}}
 
 function applyTheme(theme, persist = false){document.documentElement.dataset.theme=theme;document.getElementById("themeToggle").innerHTML=icon(theme==="dark"?"sun":"moon",18);document.querySelector('meta[name="theme-color"]').content=theme==="dark"?"#111820":"#f4f7fb";if(persist)localStorage.setItem("taskflow-theme",theme)}
 function toggleTheme(){const current=document.documentElement.dataset.theme||"light";applyTheme(current==="dark"?"light":"dark",true)}
-async function render(){nav();const view=document.getElementById("view");view.innerHTML="<div class='empty'><b>◌</b>Загружаю TaskFlow…</div>";try{if(!tg?.initData){showError("Открой TaskFlow из Telegram, чтобы войти в свой аккаунт.");return}const pages={home:homePage,tasks:tasksPage,inbox:inboxPage,stars:starsPage,templates:templatePage,penalties:penaltyPage,settings:settingsPage};await (pages[state.page]||homePage)()}catch(error){showError(error)}}
+async function render(){const renderToken=++renderVersion;nav();const view=document.getElementById("view");view.innerHTML="<div class='empty'><b>◌</b>Загружаю TaskFlow…</div>";try{if(!tg?.initData){showError("Открой TaskFlow из Telegram, чтобы войти в свой аккаунт.");return}const pages={home:homePage,tasks:tasksPage,inbox:inboxPage,stars:starsPage,templates:templatePage,penalties:penaltyPage,settings:settingsPage,activity:activityPage,more:morePage,tags:tagsPage};await (pages[state.page]||homePage)(renderToken)}catch(error){if(renderToken===renderVersion)showError(error)}}
 
 const savedTheme=localStorage.getItem("taskflow-theme");
 applyTheme(savedTheme||(tg?.colorScheme==="dark"?"dark":"light"));
@@ -411,4 +432,5 @@ tg?.ready(); tg?.expand();
 tg?.BackButton?.hide();
 tg?.onEvent?.("themeChanged",()=>{if(!localStorage.getItem("taskflow-theme"))applyTheme(tg.colorScheme==="dark"?"dark":"light")});
 tg?.BackButton?.onClick(()=>{if(document.getElementById("modalWrap").classList.contains("open")){closeModal();return}if(state.page!=="home")go("home");else tg.BackButton.hide()});
+if (tg?.initData) openDeepLink();
 render();

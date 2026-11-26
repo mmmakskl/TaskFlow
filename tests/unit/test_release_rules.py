@@ -99,12 +99,14 @@ async def test_maximum_unicode_task_screens_and_callbacks_fit_limits():
     )
     repo = SimpleNamespace(
         users=AsyncMock(return_value=users),
+        task_tag_names=AsyncMock(return_value=["<tag>"]),
         pending_next=AsyncMock(return_value=(task, 1)),
         children=AsyncMock(return_value=[]),
         blockers=AsyncMock(return_value=[]),
         links_for=AsyncMock(return_value=[]),
     )
     tasks = SimpleNamespace(
+        settings=SimpleNamespace(webhook_base_url=""),
         view=AsyncMock(return_value=task),
         repo=repo,
         can_manage=lambda task, actor: task.owner_user_id == actor.id,
@@ -119,7 +121,9 @@ async def test_maximum_unicode_task_screens_and_callbacks_fit_limits():
         def handle_data(self, data):
             self.text += data
 
-    for text, markup in (await ui.task_details(users[0], task.id), await ui.rating(users[1])):
+    details, detail_markup = await ui.task_details(users[0], task.id)
+    assert "&lt;tag&gt;" in details
+    for text, markup in ((details, detail_markup), await ui.rating(users[1])):
         parser = VisibleText()
         parser.feed(text)
         assert len(parser.text.encode("utf-16-le")) // 2 <= 4096

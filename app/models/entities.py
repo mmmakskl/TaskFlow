@@ -417,3 +417,67 @@ class Notification(Base):
             postgresql_where=text("kind = 'rating_pending' AND status = 'pending'"),
         ),
     )
+
+
+class Tag(TimestampMixin, Base):
+    __tablename__ = "tags"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    normalized_name: Mapped[str] = mapped_column(String(80), unique=True)
+    operation_key: Mapped[str] = mapped_column(String(80), unique=True)
+    color: Mapped[str] = mapped_column(String(7))
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
+class TaskTag(Base):
+    __tablename__ = "task_tags"
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id"), primary_key=True)
+
+
+class TemplateTag(Base):
+    __tablename__ = "template_tags"
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("task_templates.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id"), primary_key=True)
+
+
+class ActivityBoard(TimestampMixin, Base):
+    __tablename__ = "activity_boards"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    name: Mapped[str] = mapped_column(String(80))
+    operation_key: Mapped[str] = mapped_column(String(80), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
+class ActivityTracker(TimestampMixin, Base):
+    __tablename__ = "activity_trackers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("activity_boards.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(80))
+    color: Mapped[str] = mapped_column(String(7))
+    metric: Mapped[str] = mapped_column(String(12))
+    unit: Mapped[str | None] = mapped_column(String(40))
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    operation_key: Mapped[str] = mapped_column(String(80), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    __table_args__ = (
+        CheckConstraint("metric IN ('TASKS','TIME','QUANTITY')", name="ck_trackers_metric"),
+        CheckConstraint(
+            "(metric = 'QUANTITY' AND unit IS NOT NULL AND length(unit) BETWEEN 1 AND 40) OR (metric <> 'QUANTITY' AND unit IS NULL)",
+            name="ck_trackers_unit",
+        ),
+    )
+
+
+class TrackerTag(Base):
+    __tablename__ = "tracker_tags"
+    tracker_id: Mapped[int] = mapped_column(
+        ForeignKey("activity_trackers.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[int] = mapped_column(ForeignKey("tags.id"), primary_key=True)

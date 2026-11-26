@@ -22,10 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config.settings import Settings
 from app.models import Penalty, PenaltyType, Task, TaskTarget, TaskTemplate, User
+from app.repositories.activity import ActivityRepository
 from app.repositories.base import Repository
 from app.repositories.results import ResultRepository
 from app.repositories.tasks import TaskRepository
 from app.repositories.templates import TaskTemplateRepository
+from app.services.activity import ActivityService, tag_json
 from app.services.penalties import PenaltyService
 from app.services.results import ResultService
 from app.services.rules import DomainError
@@ -51,12 +53,15 @@ class TaskInput(BaseModel):
     template_id: int | None = Field(default=None, ge=1)
     template_version: int | None = Field(default=None, ge=1)
     template_quantity: int | None = Field(default=None, ge=1, le=10080)
+    tag_ids: list[int] | None = Field(default=None, max_length=50)
     parent_task_id: int | None = Field(default=None, ge=1)
     parent_version: int | None = Field(default=None, ge=1)
 
 
 class TaskEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    tag_ids: list[int] | None = Field(default=None, max_length=50)
 
     version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=200)
@@ -102,6 +107,8 @@ class TaskLinkRemove(BaseModel):
 class TemplateInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    tag_ids: list[int] | None = Field(default=None, max_length=50)
+
     title: str = Field(min_length=1, max_length=200)
     points: int = Field(ge=1, le=10000)
     estimated_minutes: int | None = Field(default=None, ge=1, le=10080)
@@ -113,6 +120,8 @@ class TemplateInput(BaseModel):
 
 class TemplateEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    tag_ids: list[int] | None = Field(default=None, max_length=50)
 
     version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=200)
@@ -316,6 +325,10 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             ResultService(ResultRepository(session), settings),
         )
 
+    from app.web.activity import register_activity_routes
+
+    register_activity_routes(router, settings, actor_dependency, session_dependency)
+
     @router.get("/miniapp")
     async def miniapp_entry() -> FileResponse:
         return FileResponse(STATIC_INDEX, media_type="text/html")
@@ -369,13 +382,17 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
     @router.get("/api/miniapp/tasks")
     async def task_list(
         scope: str = Query(default="mine"),
+        tag_id: int | None = Query(default=None, ge=1),
+        search: str | None = Query(default=None, max_length=200),
         filter_name: str = Query(default="all", alias="filter"),
         page: int = Query(default=0, ge=0, le=100000),
         actor: User = Depends(actor_dependency),
         session: AsyncSession = Depends(session_dependency),
     ) -> dict[str, Any]:
         task_service, _, _ = services(session)
-        rows, count = await task_service.repo.list(actor, filter_name, page, scope=scope)
+        rows, count = await task_service.repo.list(
+            actor, filter_name, page, scope=scope, tag_id=tag_id, search=search
+        )
         participants = await task_service.user_repo.participants()
         names = {user.id: user.display_name for user in participants}
         summary = (
@@ -384,8 +401,10 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             else None
         )
         items: list[dict[str, Any]] = []
+        tags_by_task = await ActivityRepository(session).task_tags([task.id for task in rows])
         for task in rows:
             item = task_json(task, names)
+            item["tags"] = [tag_json(tag) for tag in tags_by_task.get(task.id, [])]
             children = await task_service.repo.children(task.id)
             item["children"] = [task_json(child, names) for child in children]
             item["subtask_summary"] = {
@@ -466,6 +485,8 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         task = await task_service.view(actor, task_id)
         names = {user.id: user.display_name for user in await task_service.repo.users()}
         result = task_json(task, names)
+        tags_by_task = await ActivityRepository(session).task_tags([task.id])
+        result["tags"] = [tag_json(tag) for tag in tags_by_task.get(task.id, [])]
         result["comment"] = task.comment
         result["can_manage"] = task_service.can_manage(task, actor)
         result["child_target"] = (
@@ -554,6 +575,7 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
             template_quantity=body.template_quantity,
             parent_task_id=body.parent_task_id,
             parent_version=body.parent_version,
+            tag_ids=body.tag_ids,
         )
         names = {user.id: user.display_name for user in await task_service.repo.users()}
         return task_json(task, names)
@@ -624,15 +646,24 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         session: AsyncSession = Depends(session_dependency),
     ) -> dict[str, Any]:
         task_service, _, _ = services(session)
-        changes = body.model_dump(exclude={"version"}, exclude_unset=True)
+        changes = body.model_dump(exclude={"version", "tag_ids"}, exclude_unset=True)
         if "deadline" in changes:
             value = changes["deadline"]
             changes["deadline"] = (
                 datetime.combine(value, day_time.max, ZoneInfo(actor.timezone)) if value else None
             )
-        if not changes:
+        if not changes and body.tag_ids is None:
             raise HTTPException(422, "No task fields to update")
-        task = await task_service.edit(actor, task_id, body.version, **changes)
+        task = (
+            await task_service.edit(actor, task_id, body.version, **changes)
+            if changes
+            else await task_service.view(actor, task_id)
+        )
+        if body.tag_ids is not None:
+            await ActivityService(ActivityRepository(session), settings).set_tags(
+                actor, task_id, task.version if changes else body.version, body.tag_ids
+            )
+
         names = {user.id: user.display_name for user in await task_service.repo.users()}
         return task_json(task, names)
 
@@ -766,9 +797,15 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         session: AsyncSession = Depends(session_dependency),
     ) -> dict[str, Any]:
         service = TaskTemplateService(TaskTemplateRepository(session), settings)
+        rows = await service.list(actor, not include_inactive, page)
+        tags_by_template = await ActivityRepository(session).template_tags([t.id for t in rows])
         return {
             "items": [
-                template_json(t) for t in await service.list(actor, not include_inactive, page)
+                {
+                    **template_json(t),
+                    "tags": [tag_json(tag) for tag in tags_by_template.get(t.id, [])],
+                }
+                for t in rows
             ],
             "count": await service.count(actor, not include_inactive),
             "page": page,
@@ -791,6 +828,7 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
                 pricing_mode=body.pricing_mode,
                 base_quantity=body.base_quantity,
                 unit_label=body.unit_label,
+                tag_ids=body.tag_ids,
             )
         )
 
@@ -801,7 +839,9 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         session: AsyncSession = Depends(session_dependency),
     ) -> dict[str, Any]:
         service = TaskTemplateService(TaskTemplateRepository(session), settings)
-        return template_json(await service.view(actor, template_id))
+        template = await service.view(actor, template_id)
+        tags = (await ActivityRepository(session).template_tags([template.id])).get(template.id, [])
+        return {**template_json(template), "tags": [tag_json(tag) for tag in tags]}
 
     @router.patch("/api/miniapp/templates/{template_id}")
     async def template_edit(
@@ -811,10 +851,23 @@ def create_router(settings: Settings, factory: async_sessionmaker[AsyncSession])
         session: AsyncSession = Depends(session_dependency),
     ) -> dict[str, Any]:
         service = TaskTemplateService(TaskTemplateRepository(session), settings)
-        changes = body.model_dump(exclude={"version"}, exclude_unset=True)
-        if not changes:
+        changes = body.model_dump(exclude={"version", "tag_ids"}, exclude_unset=True)
+        if not changes and body.tag_ids is None:
             raise HTTPException(422, "No template fields to update")
-        return template_json(await service.edit(actor, template_id, body.version, **changes))
+        template = (
+            await service.edit(actor, template_id, body.version, **changes)
+            if changes
+            else await service.view(actor, template_id)
+        )
+        if body.tag_ids is not None:
+            await ActivityService(ActivityRepository(session), settings).set_tags(
+                actor,
+                template_id,
+                template.version if changes else body.version,
+                body.tag_ids,
+                template=True,
+            )
+        return template_json(template)
 
     @router.delete("/api/miniapp/templates/{template_id}")
     async def template_delete(
