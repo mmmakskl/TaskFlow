@@ -103,7 +103,8 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             ]
             app_buttons = [call for call in api.calls if isinstance(call, SetChatMenuButton)]
             assert {call.chat_id for call in app_buttons} == {None, 1001, 1002}
-            assert next(call for call in app_buttons if call.chat_id is None).menu_button.type == "commands"
+            default = next(call for call in app_buttons if call.chat_id is None)
+            assert default.menu_button.type == "commands"
             for chat_id in (1001, 1002):
                 button = [call.menu_button for call in app_buttons if call.chat_id == chat_id][-1]
                 assert button.type == "web_app"
