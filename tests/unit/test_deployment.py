@@ -100,3 +100,23 @@ def test_startup_does_not_serve_after_failure(settings, monkeypatch, failure):
     with pytest.raises(SystemExit):
         startup.main()
     execute.assert_not_called()
+
+
+def test_html_widget_flag_defaults_to_disabled(settings):
+    data = settings.model_dump(exclude={"telegram_html_widget_enabled"})
+    assert Settings(**data, _env_file=None).telegram_html_widget_enabled is False
+
+
+@pytest.mark.parametrize("value", [True, "true", "1"])
+def test_unimplemented_html_widget_cannot_be_enabled(settings, value):
+    with pytest.raises(ValidationError, match="TELEGRAM_HTML_WIDGET_ENABLED"):
+        Settings(**{**settings.model_dump(), "telegram_html_widget_enabled": value}, _env_file=None)
+
+
+def test_html_widget_env_is_validated(settings, monkeypatch):
+    data = settings.model_dump(exclude={"telegram_html_widget_enabled"})
+    monkeypatch.setenv("TELEGRAM_HTML_WIDGET_ENABLED", "false")
+    assert Settings(**data, _env_file=None).telegram_html_widget_enabled is False
+    monkeypatch.setenv("TELEGRAM_HTML_WIDGET_ENABLED", "true")
+    with pytest.raises(ValidationError, match="TELEGRAM_HTML_WIDGET_ENABLED"):
+        Settings(**data, _env_file=None)

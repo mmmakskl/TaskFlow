@@ -5,10 +5,9 @@ import pytest
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import (
-    DeleteMyCommands,
     SendMessage,
-    SendRichMessage,
     SetChatMenuButton,
+    SetMyCommands,
     SetWebhook,
 )
 from aiogram.types import InlineKeyboardMarkup
@@ -93,19 +92,21 @@ async def test_production_configuration_processes_real_worker_inbox(factory, set
             assert len(registrations) == 1
             assert registrations[0].url == "https://release.example.test/telegram/webhook"
             assert registrations[0].secret_token == production.webhook_secret.get_secret_value()
-            menus = [call for call in api.calls if isinstance(call, SendRichMessage)]
+            menus = [
+                call
+                for call in api.calls
+                if isinstance(call, SendMessage)
+                and isinstance(call.reply_markup, InlineKeyboardMarkup)
+            ]
             dashboards = [
                 call for call in menus if isinstance(call.reply_markup, InlineKeyboardMarkup)
             ]
             app_buttons = [call for call in api.calls if isinstance(call, SetChatMenuButton)]
-            assert {call.chat_id for call in app_buttons} == {1001, 1002}
-            assert all(
-                call.menu_button.web_app.url == "https://release.example.test/miniapp"
-                for call in app_buttons
-            )
-            assert len([call for call in api.calls if isinstance(call, DeleteMyCommands)]) == 3
+            assert {call.chat_id for call in app_buttons} == {None, 1001, 1002}
+            assert all(call.menu_button.type == "commands" for call in app_buttons)
+            assert len([call for call in api.calls if isinstance(call, SetMyCommands)]) == 3
             assert len(menus) == 1 and len(dashboards) == 1
-            assert "Неделя" in dashboards[0].rich_message.html
+            assert "Неделя" in dashboards[0].text
             assert all(call.chat_id == 1001 for call in menus)
 
 

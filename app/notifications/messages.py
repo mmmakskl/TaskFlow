@@ -1,7 +1,8 @@
 """Bounded, escaped notification templates; no database or delivery side effects."""
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardMarkup
 
+from app.bot.keyboards.common import button, keyboard
 from app.bot.render import safe
 from app.models import Notification
 
@@ -52,24 +53,12 @@ def notification_message(
     raise ValueError("unsupported_notification")
 
 
-def notification_link(row: Notification, base_url: str) -> InlineKeyboardMarkup | None:
-    if not base_url.startswith("https://"):
-        return None
+def notification_link(row: Notification, base_url: str = "") -> InlineKeyboardMarkup:
+    """Navigation is validated by the same authenticated chat handlers as menu actions."""
     if row.kind == "rating_pending":
-        target = "screen=inbox"
-    elif row.kind in {"rated", "task_rejected"} and type(row.payload.get("task_id")) is int:
-        target = f"screen=tasks&task={row.payload['task_id']}"
-    elif row.kind == "penalty_created":
-        target = "screen=penalties"
-    else:
-        target = "screen=home"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Открыть в TaskFlow",
-                    web_app=WebAppInfo(url=base_url.rstrip("/") + "/miniapp?" + target),
-                )
-            ]
-        ]
-    )
+        return keyboard([button("Оценить задачи", "ratings")])
+    if row.kind in {"rated", "task_rejected"} and type(row.payload.get("task_id")) is int:
+        return keyboard([button("Открыть задачу", "task", row.payload["task_id"])])
+    if row.kind == "penalty_created":
+        return keyboard([button("Штрафы", "penalty_list")])
+    return keyboard([button("Меню", "menu")])

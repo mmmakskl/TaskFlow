@@ -2,8 +2,8 @@
 
 Private Telegram productivity app for Max and Vika: assign personal or shared tasks, agree on
 points, use fixed, time-based or quantity-based templates, and track weekly results minus penalties.
-Both participants can view each other’s tasks and totals. The Russian interface uses compact screens, persistent quick
-actions, inline controls, a calendar and five-item lists. Task estimates, deadlines and comments are optional.
+Both participants can view each other’s tasks and totals. The Russian chat interface uses ordinary HTML messages, inline controls, command menus,
+a calendar and five-item lists. `/start` and `/menu` open the chat menu. Task estimates, deadlines and comments are optional.
 Forms and all business data persist in PostgreSQL.
 
 **Release status:** Mini App analytics and volume-priced templates were merged to `main` at
@@ -11,6 +11,14 @@ Forms and all business data persist in PostgreSQL.
 return 200 and the live Mini App HTML, CSS and JS match the release assets. Authenticated Telegram
 flows and two-account acceptance remain separately unverified. See [release evidence](docs/READINESS.md),
 [QA report](docs/QA_REPORT.md) and [fresh review](docs/PRODUCTION_REVIEW.md).
+
+The standalone Mini App remains available at `/miniapp`; new bot menus and notifications stay
+inside the chat. `TELEGRAM_HTML_WIDGET_ENABLED=false` is the only supported setting in this release.
+Setting it to `true` fails configuration validation because the future in-chat widget is not yet
+implemented. Ordinary HTML messages do not call Rich Message or Widget APIs. See the
+[widget specification and mockups](docs/telegram-widget/README.md) and
+[chat architecture](docs/telegram-chat-architecture.md). This branch has not been deployed;
+previous release evidence does not validate this change.
 
 ## Architecture and repository map
 

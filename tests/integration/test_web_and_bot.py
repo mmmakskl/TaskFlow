@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from aiogram import Bot
 from aiogram.methods import EditMessageReplyMarkup, EditMessageText, SendMessage, SendRichMessage
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select, update
 
@@ -61,21 +61,14 @@ class BotDriver:
             and not isinstance(getattr(call, "reply_markup", None), ReplyKeyboardMarkup)
         ]
         text_call = next(
-            call
-            for call in reversed(calls)
-            if isinstance(call, (SendMessage, SendRichMessage, EditMessageText))
+            call for call in reversed(calls) if isinstance(call, (SendMessage, EditMessageText))
         )
         last = next(
             call
             for call in reversed(calls)
-            if isinstance(
-                call, (SendMessage, SendRichMessage, EditMessageText, EditMessageReplyMarkup)
-            )
+            if isinstance(call, (SendMessage, EditMessageText, EditMessageReplyMarkup))
         )
-        rich_message = getattr(text_call, "rich_message", None)
-        text = rich_message.html if rich_message else text_call.text
-        if rich_message:
-            text = text.removeprefix("<p>").removesuffix("</p>").replace("<br>", "\n")
+        text = text_call.text
         return EditMessageText(
             text=text,
             chat_id=user_id,
@@ -92,6 +85,18 @@ class BotDriver:
                 )
             )
         assert await process_update(self.factory, self.dp, self.bot)
+        # Every real chat workflow below also guards its emitted transport contract.
+        for call in self.api.calls:
+            assert not isinstance(call, SendRichMessage)
+            assert getattr(call, "rich_message", None) is None
+            markup = getattr(call, "reply_markup", None)
+            if isinstance(markup, InlineKeyboardMarkup):
+                assert all(
+                    control.web_app is None and not (control.url and "/miniapp" in control.url)
+                    for row in markup.inline_keyboard
+                    for control in row
+                )
+            assert "/miniapp" not in (getattr(call, "text", None) or "")
 
     async def text(self, user_id: int, text: str) -> None:
         await self.put(
@@ -166,8 +171,7 @@ async def test_real_aiogram_task_flow_with_mocked_bot_api(
     sends = [
         call
         for call in driver.api.calls
-        if isinstance(call, SendRichMessage)
-        and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
+        if isinstance(call, SendMessage) and isinstance(call.reply_markup, InlineKeyboardMarkup)
     ]
     assert len(sends) == 3  # Two screens for Max, one for Vika; /menu reopens at the chat bottom.
     await driver.bot.session.close()

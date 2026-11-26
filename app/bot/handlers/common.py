@@ -12,7 +12,6 @@ from app.bot.ack import answer_callback
 from app.bot.callbacks.actions import Action
 from app.bot.render import discard_input, render, require_current, reset
 from app.bot.states.forms import ConfirmationForm
-from app.config.settings import Settings
 from app.models import User
 from app.services.rules import DomainError
 from app.services.ui import UIService
@@ -39,12 +38,12 @@ async def show(
 
 
 async def menu_command(
-    message: Message, bot: Bot, state: FSMContext, actor: User, settings: Settings
+    message: Message, bot: Bot, state: FSMContext, actor: User, ui: UIService
 ) -> None:
-    await reset(state, keep_navigation=False)
-    from app.bot.navigation import launch_miniapp
+    from app.bot.navigation import DESTINATIONS, destination_screen, remove_reply_keyboard
 
-    await launch_miniapp(bot, actor, settings)
+    await remove_reply_keyboard(bot, actor)
+    await destination_screen(DESTINATIONS["menu"], bot, actor, state, ui)
     await discard_input(message)
 
 

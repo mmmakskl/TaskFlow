@@ -43,17 +43,8 @@ def create_dispatcher(config: Settings) -> Dispatcher:
     async def other(
         message: Message, bot: Bot, state: FSMContext, actor: User, ui: UIService
     ) -> None:
-        if await state.get_state():
-            await reset(state, keep_navigation=False)
-            await bot.send_message(
-                actor.telegram_id,
-                "Управление задачами перенесено в Mini App. Открой его кнопкой TaskFlow в меню бота или отправь /start.",
-            )
-        else:
-            await bot.send_message(
-                actor.telegram_id,
-                "Открой TaskFlow кнопкой меню под полем ввода или отправь /start.",
-            )
+        await reset(state, keep_navigation=False)
+        await render(bot, actor.telegram_id, state, *await ui.menu(actor))
         await discard_input(message)
 
     dispatcher.include_router(fallback)
