@@ -199,3 +199,14 @@ test('a late task response cannot reopen a modal after navigation', async () => 
   await pending;
   assert.equal(nodes.modalWrap.classList.contains('open'), false);
 });
+
+test('search begins across all participants and statuses and restores filters when cleared', () => {
+  const { context } = harness();
+  vm.runInContext("setSearch('  проект  ')", context);
+  assert.equal(vm.runInContext('state.search', context), 'проект');
+  assert.equal(vm.runInContext('state.scope', context), 'all');
+  assert.equal(vm.runInContext('state.filter', context), 'all');
+  vm.runInContext("setSearch('')", context);
+  assert.equal(vm.runInContext('state.scope', context), 'mine');
+  assert.equal(vm.runInContext('state.filter', context), 'active');
+});

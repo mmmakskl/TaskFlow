@@ -117,6 +117,28 @@ async def test_miniapp_searches_all_task_titles(factory, settings) -> None:
         assert child_result["count"] == 1
         assert child_result["items"][0]["parent_task_id"] == epic.json()["id"]
 
+        # The task-list search keeps the global search's terminal tasks and subtasks.
+        global_cancelled = await client.get(
+            "/api/miniapp/tasks",
+            params={"scope": "all", "filter": "all", "search": "диплом"},
+            headers=peer_headers,
+        )
+        assert global_cancelled.status_code == 200
+        assert global_cancelled.json()["items"][0]["status"] == "CANCELLED"
+        global_child = await client.get(
+            "/api/miniapp/tasks",
+            params={"scope": "all", "filter": "all", "search": "особая"},
+            headers=peer_headers,
+        )
+        assert global_child.status_code == 200
+        assert global_child.json()["items"][0]["id"] == child.json()["id"]
+        filtered = await client.get(
+            "/api/miniapp/tasks",
+            params={"scope": "all", "filter": "done", "search": "особая"},
+            headers=peer_headers,
+        )
+        assert filtered.status_code == 200 and filtered.json()["count"] == 0
+
 
 async def test_miniapp_auth_and_task_workflow(factory, settings) -> None:
     app = create_app(settings, session_factory=factory, workers=False)

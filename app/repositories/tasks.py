@@ -89,7 +89,10 @@ class TaskRepository(Repository):
         scope_condition = (
             Task.evaluator_user_id == actor.id if pending else self.scope(actor, scope)
         )
+        term = search.strip() if search else ""
         statuses = ("BACKLOG",) if pending else FILTERS[filter_name]
+        if term and filter_name == "all" and not pending:
+            statuses = ("BACKLOG", "TODO", "IN_PROGRESS", "DONE", "CANCELLED")
         conditions: tuple[ColumnElement[bool], ...] = (
             scope_condition,
             Task.deleted_at.is_(None),
@@ -98,10 +101,10 @@ class TaskRepository(Repository):
         )
         if tag_id is not None:
             conditions += (Task.id.in_(select(TaskTag.task_id).where(TaskTag.tag_id == tag_id)),)
-        if search:
-            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        if term:
+            escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             conditions += (Task.title.ilike(f"%{escaped}%", escape="\\"),)
-        if not pending:
+        if not pending and not term:
             conditions += (Task.parent_task_id.is_(None),)
         if filter_name == "overdue" and not pending:
             conditions += (
