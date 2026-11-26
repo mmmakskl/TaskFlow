@@ -3,6 +3,7 @@ from datetime import datetime
 
 from app.config.settings import Settings
 from app.models import Notification, ScoreEvent, Task, TaskLink, TaskTarget, TaskTemplate, User
+from app.models.entities import TaskTag
 from app.repositories.tasks import TaskRepository
 from app.services.base import AuthorizedService
 from app.services.deadlines import deadline_delay
@@ -84,6 +85,7 @@ class TaskService(AuthorizedService):
         template_quantity: int | None = None,
         parent_task_id: int | None = None,
         parent_version: int | None = None,
+        tag_ids: list[int] | None = None,
     ) -> Task:
         actor = await self.actor(actor)
         key = operation_key(key)
@@ -202,8 +204,21 @@ class TaskService(AuthorizedService):
             parent_task_id=parent.id if parent else None,
             operation_key=key,
         )
+        template_tags = await self.repo.template_tag_ids(template.id) if template else []
+        if tag_ids is None and template is not None:
+            tag_ids = template_tags
+        if tag_ids is not None:
+            if len(tag_ids) > 50 or len(set(tag_ids)) != len(tag_ids):
+                raise DomainError("Недопустимый список тегов.")
+            tags = await self.repo.tags_by_ids(tag_ids) if tag_ids else []
+            if len(tags) != len(tag_ids) or any(
+                tag.archived and tag.id not in template_tags for tag in tags
+            ):
+                raise DomainError("Тег недоступен или архивирован.")
         self.repo.add(task)
         await self.repo.flush()
+        for tag_id in tag_ids or []:
+            self.repo.add(TaskTag(task_id=task.id, tag_id=tag_id))
         self.repo.audit(
             actor, task, "create", {}, {"title": title, "estimated_minutes": task.estimated_minutes}
         )

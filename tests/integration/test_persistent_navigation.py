@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from aiogram.methods import SendMessage, SetMyCommands
+from aiogram.methods import SendMessage, SendRichMessage, SetMyCommands
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
@@ -61,13 +61,13 @@ async def enter(driver, kind):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("🏠 Меню", "НЕДЕЛЯ"),
+        ("🏠 Меню", "Неделя"),
         ("➕ Задача", "Для кого"),
         ("📋 Задачи", "Мои • 0"),
         ("📥 Входящие", "входящих"),
         ("⚡ Шаблоны", "Шаблоны"),
         ("🏆 Результаты", "Разница"),
-        ("/menu", "НЕДЕЛЯ"),
+        ("/menu", "Неделя"),
         ("/new", "Для кого"),
         ("/tasks", "Мои • 0"),
         ("/inbox", "входящих"),
@@ -220,7 +220,7 @@ async def test_direct_exit_discards_even_corrupt_draft(factory, settings, exit_t
         row = await session.scalar(select(Dialog))
         row.data = {**row.data, "flow": "broken", "nav_pending": []}
     await driver.text(1001, exit_text)
-    assert ("WEBHOOK_BASE_URL" if exit_text == "/start" else "НЕДЕЛЯ") in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     state, data = await dialog(driver)
     assert state is None and "title" not in data and "nav_pending" not in data
     await driver.bot.session.close()
@@ -307,9 +307,13 @@ async def test_start_opens_miniapp_without_command_suggestions(factory, settings
         launcher = next(
             c.reply_markup
             for c in reversed(driver.api.calls)
-            if isinstance(c, SendMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
+            if isinstance(c, SendRichMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
         )
-        assert launcher.inline_keyboard[0][0].web_app.url == "https://taskflow.example/miniapp"
+        assert any(
+            button.web_app and button.web_app.url == "https://taskflow.example/miniapp"
+            for row in launcher.inline_keyboard
+            for button in row
+        )
         assert any(
             isinstance(getattr(c, "reply_markup", None), ReplyKeyboardRemove)
             for c in driver.api.calls
@@ -387,7 +391,7 @@ async def test_corrupt_persisted_prompt_recovers_without_mutation(factory, setti
         row.data = data
     driver.dp = create_dispatcher(settings)
     await driver.text(1001, "/results")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     assert (await dialog(driver))[0] is None
     async with factory() as session:
         assert await session.scalar(select(func.count(Task.id))) == 0
@@ -445,7 +449,7 @@ async def test_menu_reopens_at_bottom_then_other_commands_edit_latest_screen(fac
     inline = [
         c
         for c in driver.api.calls
-        if isinstance(c, SendMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
+        if isinstance(c, SendRichMessage) and isinstance(c.reply_markup, InlineKeyboardMarkup)
     ]
     assert not carriers and len(inline) == 4
     await driver.bot.session.close()
@@ -459,7 +463,7 @@ async def test_present_null_pending_on_valid_persisted_title_recovers_dashboard(
         row.data = {**row.data, "nav_pending": None}
     driver.dp = create_dispatcher(settings)
     await driver.text(1001, "/results")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     state, data = await dialog(driver)
     assert state is None and "nav_pending" not in data
     async with factory() as session:

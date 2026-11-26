@@ -7,6 +7,7 @@ from aiogram.methods import (
     AnswerCallbackQuery,
     EditMessageText,
     SendMessage,
+    SendRichMessage,
 )
 from aiogram.types import ReplyKeyboardMarkup
 from sqlalchemy import func, select
@@ -47,12 +48,12 @@ async def seed_tasks(factory, settings, count=12, done=False):
 async def test_fast_create_comment_input_and_dashboard_single_message(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     assert all(
         any(label in button.text for button in buttons(driver))
-        for label in ("Задача", "Штраф", "Все задачи", "Входящие", "Результаты", "Настройки")
+        for label in ("Новая задача", "Штраф", "Мои задачи", "Входящие", "Результаты", "Настройки")
     )
-    await driver.press(1001, "➕ Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Быстрая задача")
     old = await driver.press(1001, "✅ Создать")
@@ -80,7 +81,7 @@ async def test_fast_create_comment_input_and_dashboard_single_message(factory, s
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, SendMessage)
+                if isinstance(call, SendRichMessage)
                 and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
             ]
         )
@@ -92,7 +93,7 @@ async def test_filter_page_context_survives_status_edit_and_confirmation(factory
     await seed_tasks(factory, settings, 12, done=True)
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Выполненные")
     await driver.press(1001, "▶️")
     assert any(button.text == "2/3" for button in buttons(driver))
@@ -133,7 +134,7 @@ async def test_menu_interrupts_forms_and_old_buttons_cannot_resume(factory, sett
             await driver.press(1001, "5 мин")
             await driver.press(1001, "Пропустить")
     else:
-        await driver.press(1001, "Задача")
+        await driver.press(1001, "Новая задача")
         await driver.press(1001, "Себе")
         if step != "title":
             await driver.text(1001, "Interrupted")
@@ -156,9 +157,9 @@ async def test_menu_interrupts_forms_and_old_buttons_cannot_resume(factory, sett
         callback("task_estimate", version=1, value="30"),
     )
     await driver.text(1001, "/menu")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     await driver.press(1001, data=old)
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     async with factory() as session:
         dialog = await session.scalar(select(Dialog).where(Dialog.key.like("%:1001:1001:%")))
         assert dialog.state is None and "key" not in dialog.data
@@ -169,7 +170,7 @@ async def test_menu_interrupts_forms_and_old_buttons_cannot_resume(factory, sett
 async def test_unexpected_text_commands_and_media_keep_draft_and_buttons(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "/unknown")
     assert "Новая задача" in driver.screen(1001).text
@@ -204,7 +205,7 @@ async def test_unexpected_text_commands_and_media_keep_draft_and_buttons(factory
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, SendMessage)
+                if isinstance(call, (SendMessage, SendRichMessage))
                 and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
             ]
         )
@@ -216,13 +217,13 @@ async def test_old_mutation_button_cannot_interrupt_unrelated_form(factory, sett
     await seed_tasks(factory, settings, 1)
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Задача 00")
     old = data_for(driver, 1001, "✅ Выполнено")
     await driver.press(1001, "Меню")
     await driver.press(1001, data=old)
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
-    await driver.press(1001, "Задача")
+    assert "Неделя" in driver.screen(1001).text
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.press(1001, data=old)
     assert "Новая задача" in driver.screen(1001).text
@@ -307,13 +308,13 @@ async def test_menu_reopens_at_chat_bottom(factory, settings):
     await driver.text(1001, "/menu")
     await driver.text(1001, "/menu")
     await driver.text(1001, "/menu")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
     assert (
         len(
             [
                 call
                 for call in driver.api.calls
-                if isinstance(call, SendMessage)
+                if isinstance(call, SendRichMessage)
                 and not isinstance(call.reply_markup, ReplyKeyboardMarkup)
             ]
         )
@@ -339,13 +340,13 @@ async def test_incomplete_fsm_restores_menu_without_traceback(factory, settings,
         dialog.data = {**dialog.data, **corruption["data"]}
     await driver.text(1001, "text")
     assert "Черновик сброшен" in driver.screen(1001).text
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
 
 
 async def test_form_survives_dispatcher_restart_and_malformed_callback(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Persistent draft")
     driver.dp = create_dispatcher(settings)
@@ -426,7 +427,7 @@ async def test_results_history_filters_cancel_and_old_confirmation(factory, sett
         )
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Активные")
     await driver.press(1001, "Отменить")
     await driver.press(1001, "Отменить")
@@ -460,7 +461,7 @@ async def test_optional_comment_and_description_clear_with_one_button(factory, s
         )
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Очистить")
     await driver.press(1001, "Изменить")
     await driver.press(1001, "Комментарий")
@@ -494,7 +495,7 @@ async def test_optional_message_cleanup_network_failure_does_not_undo_action(fac
 
     driver.api.make_request = request
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Still saved")
     await driver.press(1001, "⏱ Время")

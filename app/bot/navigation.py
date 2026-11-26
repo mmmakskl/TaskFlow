@@ -273,7 +273,10 @@ async def handle_navigation(event: Message | CallbackQuery, data: dict[str, Any]
     command = await message_destination(event, bot) if isinstance(event, Message) else None
     if command == "start":
         await reset(state, keep_navigation=False)
-        await launch_miniapp(bot, actor, data["settings"])
+        await bot.send_message(
+            actor.telegram_id, "Открываю TaskFlow.", reply_markup=ReplyKeyboardRemove()
+        )
+        await destination_screen(DESTINATIONS["menu"], bot, actor, state, ui)
         if isinstance(event, Message):
             await discard_input(event)
         return True

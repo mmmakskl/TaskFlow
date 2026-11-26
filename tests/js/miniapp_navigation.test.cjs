@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.join(__dirname, '../../app/web/static/miniapp.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../app/web/static/activity.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '../../app/web/static/miniapp.js'), 'utf8');
 
 function element() {
   const classes = new Set();
@@ -67,6 +67,7 @@ function harness() {
           progress: task.status === 'DONE' ? 100 : 0,
         },
       }) };
+      if (url === '/api/miniapp/tags') return { ok: true, status: 200, json: async () => [] };
       if (url === '/api/miniapp/bootstrap') return { ok: true, status: 200, json: async () => ({
         user: { id: 1, name: 'Макс', timezone: 'Europe/Moscow' },
         week: { label: 'Эта неделя', scores: [
@@ -163,4 +164,49 @@ test('failed status change keeps the subtask available with its previous status'
   assert.equal(nodes.modalWrap.classList.contains('open'), true);
   assert.match(nodes.modal.innerHTML, /К выполнению/);
   assert.match(nodes.toast.textContent, /Конфликт/);
+});
+
+test('calendar covers leap year and escapes tracker names', () => {
+  const { context } = harness();
+  const html = vm.runInContext(`activityState.year=2024;activityState.today='2024-02-29';trackerCard({id:2,name:'<script>',metric:'TASKS',color:'#123456',days:{'2024-02-29':4},active_days:1,current_streak:1,best_streak:1})`, context);
+  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /2024-02-29: 4 задач/);
+  assert.equal((html.match(/class="activity-day level-/g) || []).length, 366);
+  assert.match(html, /day-today/);
+  assert.match(html, /day-future/);
+});
+
+test('activity uses fixed metric thresholds', () => {
+  const { context } = harness();
+  assert.deepEqual(Array.from(vm.runInContext("[0,1,29,30,59,60,119,120].map(n=>activityLevel('TIME',n))",context)), [0,1,1,2,2,3,3,4]);
+  assert.deepEqual(Array.from(vm.runInContext("[0,1,2,3,4,9].map(n=>activityLevel('TASKS',n))",context)), [0,1,2,3,4,4]);
+});
+
+test('template volume handler is valid inside its HTML attribute', () => {
+  const { context } = harness();
+  const html = vm.runInContext("templateUsageField({pricing_mode:'PER_TIME',points:100,base_quantity:30}).field", context);
+  assert.match(html, /oninput="updateTemplateReward\(100,30,'PER_TIME'\)"/);
+});
+
+test('a late task response cannot reopen a modal after navigation', async () => {
+  const { context, nodes } = harness();
+  let resolveRequest;
+  context.fetch = () => new Promise(resolve => { resolveRequest = resolve; });
+  const pending = vm.runInContext('taskDetail(12)', context);
+  vm.runInContext("go('more')", context);
+  resolveRequest({ ok: true, status: 200, json: async () => ({}) });
+  await pending;
+  assert.equal(nodes.modalWrap.classList.contains('open'), false);
+});
+
+test('search begins across all participants and statuses and restores filters when cleared', () => {
+  const { context } = harness();
+  vm.runInContext("setSearch('  проект  ')", context);
+  assert.equal(vm.runInContext('state.search', context), 'проект');
+  assert.equal(vm.runInContext('state.scope', context), 'all');
+  assert.equal(vm.runInContext('state.filter', context), 'all');
+  vm.runInContext("setSearch('')", context);
+  assert.equal(vm.runInContext('state.scope', context), 'mine');
+  assert.equal(vm.runInContext('state.filter', context), 'active');
 });

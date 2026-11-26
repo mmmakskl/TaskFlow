@@ -110,7 +110,7 @@ async def test_both_participants_auth_and_cross_chat_spoof_are_isolated(factory,
     driver = BotDriver(factory, settings)
     for user in (1001, 1002):
         await driver.text(user, "/menu")
-        assert "НЕДЕЛЯ" in driver.screen(user).text
+        assert "Неделя" in driver.screen(user).text
     await driver.put(
         {
             "message": {
@@ -131,7 +131,7 @@ async def test_both_participants_auth_and_cross_chat_spoof_are_isolated(factory,
 async def test_deleted_task_during_custom_rating_keeps_score_zero(factory, settings):
     driver = BotDriver(factory, settings)
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Задача")
+    await driver.press(1001, "Новая задача")
     await driver.press(1001, "Себе")
     await driver.text(1001, "Delete while rating")
     await driver.press(1001, "✅ Создать")
@@ -173,7 +173,7 @@ async def test_penalty_configuration_race_while_confirmation_is_open(factory, se
         assert await session.scalar(select(func.count(Penalty.id))) == 0
         assert await session.scalar(select(func.count(ScoreEvent.id))) == 0
     await driver.text(1001, "/menu")
-    assert "НЕДЕЛЯ" in driver.screen(1001).text
+    assert "Неделя" in driver.screen(1001).text
 
 
 async def test_network_failure_after_done_rolls_back_and_retry_awards_once(
@@ -195,7 +195,7 @@ async def test_network_failure_after_done_rolls_back_and_retry_awards_once(
         await service.rate(peer, task.id, 700, task.version)
         task_id = task.id
     await driver.text(1001, "/menu")
-    await driver.press(1001, "Все задачи")
+    await driver.press(1001, "Мои задачи")
     await driver.press(1001, "Network transaction")
     original = driver.api.make_request
 

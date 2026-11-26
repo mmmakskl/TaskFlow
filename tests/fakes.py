@@ -4,7 +4,13 @@ from typing import Any
 
 from aiogram.client.session.base import BaseSession
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage, TelegramMethod
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    EditMessageText,
+    SendMessage,
+    SendRichMessage,
+    TelegramMethod,
+)
 from aiogram.types import Chat, InlineKeyboardMarkup, Message
 
 
@@ -24,13 +30,13 @@ class TelegramSession(BaseSession):
                 method=method,
                 message="query is too old and response timeout expired or query ID is invalid",
             )
-        if isinstance(method, (SendMessage, EditMessageText)):
+        if isinstance(method, (SendMessage, SendRichMessage, EditMessageText)):
             self.next_id += 1
             return Message(
                 message_id=getattr(method, "message_id", None) or self.next_id,
                 date=datetime.now(UTC),
                 chat=Chat(id=int(method.chat_id), type="private"),
-                text=method.text,
+                text=getattr(method, "text", None),
                 reply_markup=(
                     method.reply_markup
                     if isinstance(method.reply_markup, InlineKeyboardMarkup)

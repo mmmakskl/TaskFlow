@@ -1,6 +1,6 @@
 from zoneinfo import ZoneInfo
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 from app.bot.keyboards.common import button, keyboard, pager
 from app.bot.render import progress, safe, short
@@ -65,20 +65,41 @@ class UIService:
         label, scores = await self.results.week()
         _, pending = await self.tasks.repo.pending_next(actor)
         _, active = await self.tasks.repo.list(actor, "active")
-        text = f"🎯 <b>НЕДЕЛЯ • {label}</b>\n"
+        text = f"<b>TaskFlow</b>\nНеделя · {label}\n"
         for user, earned, lost in scores:
             net = earned - lost
-            text += f"\n<b>{safe(user.display_name)}</b>\n{points(net)} / {points(user.weekly_target)}\n{progress(net, user.weekly_target)}\n"
-        text += f"\n⭐ На оценку: {pending}\n✅ Активных задач: {active}"
-        return text, keyboard(
-            [button("➕ Задача", "new"), button("📚 Шаблоны", "templates")],
+            text += f"\n<b>{safe(user.display_name)}</b> · {points(net)} / {points(user.weekly_target)}\n{progress(net, user.weekly_target)}\n"
+        text += f"\nАктивных задач: {active} · На оценку: {pending}"
+        markup = keyboard(
             [
-                button("📋 Все задачи", "list", value="mine_all"),
-                button("👥 Общие задачи", "list", value="shared_all"),
+                button("Мои задачи", "list", value="mine_all"),
+                button(f"Входящие · {pending}", "ratings"),
             ],
-            [button(f"📥 Входящие • {pending}", "ratings"), button("🏆 Результаты", "results")],
-            [button("⚠️ Штраф", "penalty"), button("⚙️ Настройки", "settings")],
+            [button("Из шаблона", "templates"), button("Общие задачи", "list", value="shared_all")],
+            [button("Результаты недели", "results")],
+            [
+                button("Новая задача", "new"),
+                button("Штрафы", "penalty"),
+                button("Настройки", "settings"),
+            ],
         )
+        if self.tasks.settings.webhook_base_url.startswith("https://"):
+            url = self.tasks.settings.webhook_base_url.rstrip("/") + "/miniapp"
+            markup.inline_keyboard[-1] = [
+                InlineKeyboardButton(
+                    text="Новая задача", web_app=WebAppInfo(url=url + "?screen=new")
+                ),
+                InlineKeyboardButton(
+                    text="Штрафы", web_app=WebAppInfo(url=url + "?screen=penalties")
+                ),
+                InlineKeyboardButton(
+                    text="Настройки", web_app=WebAppInfo(url=url + "?screen=settings")
+                ),
+            ]
+            markup.inline_keyboard.append(
+                [InlineKeyboardButton(text="Открыть TaskFlow", web_app=WebAppInfo(url=url))]
+            )
+        return text, markup
 
     async def task_created(self, actor: User, task: Task) -> tuple[str, InlineKeyboardMarkup]:
         text, _ = await self.task_details(actor, task.id)
@@ -208,6 +229,7 @@ class UIService:
         self, actor: User, task_id: int, back_filter: str = "mine_all", back_page: int = 0
     ) -> tuple[str, InlineKeyboardMarkup]:
         task = await self.tasks.view(actor, task_id)
+        tags = await self.tasks.repo.task_tag_names(task.id)
         delay = deadline_delay(task, utcnow())
         users = {user.id: user for user in await self.tasks.repo.users()}
         children = await self.tasks.repo.children(task.id)
@@ -220,6 +242,8 @@ class UIService:
         blocked_by_parent = bool(parent and parent.status == "DONE")
         unfinished_children = [child for child in children if child.status != "DONE"]
         text = f"📝 <b>{safe(task.title)}</b>\n\n👤 {safe(users[task.owner_user_id].display_name)}\n{STATUS_LABELS[task.status]}"
+        if tags:
+            text += "\nТеги: " + ", ".join(safe(tag) for tag in tags)
         if task.status == "BACKLOG":
             pending_label = (
                 "Ждёт принятия"
@@ -237,12 +261,21 @@ class UIService:
         text += f"\nПредложение: {task.proposed_points or '—'}" + (
             " каждому" if task.kind == "SHARED" and task.proposed_points else ""
         )
+        display_points = task.awarded_points if task.status == "DONE" else task.rated_points
         text += (
-            f"\n⭐ {points(task.rated_points)} баллов"
-            + (" каждому" if task.kind == "SHARED" else "")
-            if task.rated_points
+            f"\n⭐ {points(display_points)} баллов" + (" каждому" if task.kind == "SHARED" else "")
+            if display_points is not None
             else ("\n⭐ Не оценена" if task.status == "CANCELLED" else "\n⭐ Ждёт оценки")
         )
+        snapshot = task.template_snapshot or {}
+        quantity = snapshot.get("quantity")
+        if quantity is not None:
+            unit = (
+                "мин"
+                if snapshot.get("pricing_mode") == "PER_TIME"
+                else snapshot.get("unit_label", "")
+            )
+            text += f"\nОбъём: {safe(quantity)} {safe(unit)}"
         if task.rated_by_user_id:
             text += f"\nОценил(а): {safe(users[task.rated_by_user_id].display_name)}"
         elif task.rating_source == "TEMPLATE":
@@ -355,7 +388,16 @@ class UIService:
         rows.append(
             [button("⬅️ Назад", "list", back_page, value=back_filter), button("🏠 Меню", "menu")]
         )
-        return text, keyboard(*rows)
+        markup = keyboard(*rows)
+        if self.tasks.settings.webhook_base_url.startswith("https://"):
+            url = (
+                self.tasks.settings.webhook_base_url.rstrip("/")
+                + f"/miniapp?screen=tasks&task={task.id}"
+            )
+            markup.inline_keyboard.insert(
+                -1, [InlineKeyboardButton(text="Открыть в приложении", web_app=WebAppInfo(url=url))]
+            )
+        return text, markup
 
     @staticmethod
     def status_confirmation(task: Task, target: str) -> str:
